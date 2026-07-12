@@ -71,6 +71,14 @@
         "policies": {
           "cols": 2,
           "path": "services.aad.policies"
+        },
+        "directory_roles": {
+          "cols": 2,
+          "path": "services.aad.directory_roles"
+        },
+        "enterprise_apps_with_strong_subscription_roles": {
+          "cols": 4,
+          "path": "services.aad.enterprise_apps_with_strong_subscription_roles"
         }
       }
     },

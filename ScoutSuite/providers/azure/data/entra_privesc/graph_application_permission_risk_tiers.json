@@ -1,0 +1,28 @@
+{
+  "_comment": "Curated risk tiers for Microsoft Graph Application (app-only) permissions, keyed by their well-known, tenant-independent appRoleId GUID. GUIDs sourced from Microsoft's official permissions-reference documentation (microsoftgraph/microsoft-graph-docs-contrib). This is a curated subset focused on permissions with documented privilege-escalation potential (see e.g. SpecterOps/Andy Robbins' Entra ID privilege escalation research) - NOT an exhaustive list of all Graph permissions. An appRoleAssignment whose GUID isn't listed here is treated as tier 0 (unclassified / not flagged), not guessed.",
+  "microsoft_graph_app_id": "00000003-0000-0000-c000-000000000000",
+  "tiers_legend": {
+    "4": "Critical - can lead to full directory/tenant compromise (grant arbitrary directory roles, add credentials to any app, rewrite directory objects)",
+    "3": "High - broad write access enabling significant escalation or damage",
+    "1": "Low/moderate - broad read-only visibility, not directly escalation-enabling"
+  },
+  "permissions": {
+    "9e3f62cf-ca93-4989-b6ce-bf83c28f9fe8": { "name": "RoleManagement.ReadWrite.Directory", "tier": 4 },
+    "06b708a9-e830-4db3-a914-8e69da51d44f": { "name": "AppRoleAssignment.ReadWrite.All", "tier": 4 },
+    "1bfefb4e-e0b5-418b-a88f-73c46d2cc8e9": { "name": "Application.ReadWrite.All", "tier": 4 },
+    "19dbc75e-c2e2-444c-a770-ec69d8559fc7": { "name": "Directory.ReadWrite.All", "tier": 4 },
+
+    "18a4783c-866b-4cc7-a460-3d5e5662c884": { "name": "Application.ReadWrite.OwnedBy", "tier": 3 },
+    "741f803b-c850-494e-b5df-cde7c675a1ca": { "name": "User.ReadWrite.All", "tier": 3 },
+    "62a82d76-70ea-41e2-9197-370581804d09": { "name": "Group.ReadWrite.All", "tier": 3 },
+    "dbaae8cf-10b5-4b86-a4a1-f871c94c6695": { "name": "GroupMember.ReadWrite.All", "tier": 3 },
+    "89c8469c-83ad-45f7-8ff2-6e3d4285709e": { "name": "ServicePrincipalEndpoint.ReadWrite.All", "tier": 3 },
+    "01c0a623-fc9b-48e9-b794-0756f8e8f067": { "name": "Policy.ReadWrite.ConditionalAccess", "tier": 3 },
+    "7e05723c-0bb0-42da-be95-ae9f08a6e53c": { "name": "Domain.ReadWrite.All", "tier": 3 },
+
+    "7ab1d382-f21e-4acd-a863-ba3e13f7da61": { "name": "Directory.Read.All", "tier": 1 },
+    "df021288-bdef-4463-88db-98f22de89214": { "name": "User.Read.All", "tier": 1 },
+    "5b567255-7703-4780-807c-7be8301ae99b": { "name": "Group.Read.All", "tier": 1 },
+    "9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30": { "name": "Application.Read.All", "tier": 1 }
+  }
+}

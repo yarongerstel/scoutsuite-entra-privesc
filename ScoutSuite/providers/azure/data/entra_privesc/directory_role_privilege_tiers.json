@@ -1,0 +1,41 @@
+{
+  "_comment": "Curated, approximate ranking of built-in Entra ID directory roles by administrative power, used only to flag when an application's owner holds a LOWER-privileged directory role than the permissions their app has been granted. Not an authoritative Microsoft ranking. Matched by displayName (English tenant names) as returned by GET /directoryRoles; unlisted/localized role names fall back to 'default_tier'.",
+  "default_tier": 0,
+  "tiers": {
+    "5": [
+      "Global Administrator"
+    ],
+    "4": [
+      "Privileged Role Administrator",
+      "Privileged Authentication Administrator",
+      "Partner Tier2 Support"
+    ],
+    "3": [
+      "Application Administrator",
+      "Cloud Application Administrator",
+      "Hybrid Identity Administrator",
+      "Identity Governance Administrator",
+      "Partner Tier1 Support",
+      "Security Administrator"
+    ],
+    "2": [
+      "User Administrator",
+      "Authentication Administrator",
+      "Groups Administrator",
+      "Directory Writers",
+      "Exchange Administrator",
+      "SharePoint Administrator",
+      "Intune Administrator",
+      "Teams Administrator",
+      "Compliance Administrator"
+    ],
+    "1": [
+      "Helpdesk Administrator",
+      "Password Administrator",
+      "Directory Readers",
+      "Reports Reader",
+      "Security Reader",
+      "Global Reader"
+    ]
+  }
+}

@@ -29,6 +29,33 @@ class AADFacade:
             print_exception('Failed to query Microsoft Graph endpoint \"{}\": {}'.format(api_resource, e))
             return {}
 
+    async def _get_microsoft_graph_response_paginated(self, api_resource, api_version='v1.0'):
+        """
+        Same as _get_microsoft_graph_response() but follows @odata.nextLink until exhausted,
+        since owners/appRoleAssignments/role members collections can exceed a single page.
+        """
+        scopes = ['https://graph.microsoft.com/.default']
+        client = GraphClient(credential=self.credentials.get_credentials(), scopes=scopes)
+        endpoint = 'https://graph.microsoft.com/{}/{}'.format(api_version, api_resource)
+
+        values = []
+        try:
+            while endpoint:
+                response = client.get(endpoint)
+                if response.status_code == 200:
+                    response_json = response.json()
+                    values.extend(response_json.get('value', []))
+                    endpoint = response_json.get('@odata.nextLink')
+                elif response.status_code == 404:
+                    break
+                else:
+                    print_exception('Failed to query Microsoft Graph endpoint \"{}\": status code {}'.
+                                    format(api_resource, response.status_code))
+                    break
+        except Exception as e:
+            print_exception('Failed to query Microsoft Graph endpoint \"{}\": {}'.format(api_resource, e))
+        return values
+
     async def get_users(self):
         try:
             # This filters down the users which are pulled from the directory, otherwise for large tenants this
@@ -108,4 +135,65 @@ class AADFacade:
             return policies_response
         except Exception as e:
             print_exception(f'Failed to retrieve policies: {e}')
+            return []
+
+    async def get_application_owners(self, application_id):
+        try:
+            return await self._get_microsoft_graph_response_paginated(
+                f'applications/{application_id}/owners')
+        except Exception as e:
+            print_exception(f'Failed to retrieve owners for application {application_id}: {e}')
+            return []
+
+    async def get_service_principal_owners(self, service_principal_id):
+        try:
+            return await self._get_microsoft_graph_response_paginated(
+                f'servicePrincipals/{service_principal_id}/owners')
+        except Exception as e:
+            print_exception(f'Failed to retrieve owners for service principal {service_principal_id}: {e}')
+            return []
+
+    async def get_service_principal_app_role_assignments(self, service_principal_id):
+        """
+        Application (API) permissions that have actually been granted TO this service
+        principal (i.e. the permissions the app can use), as opposed to appRoles merely
+        defined/exposed BY it. This is the "what permissions did the app receive" data.
+        """
+        try:
+            return await self._get_microsoft_graph_response_paginated(
+                f'servicePrincipals/{service_principal_id}/appRoleAssignments')
+        except Exception as e:
+            print_exception(
+                f'Failed to retrieve app role assignments for service principal {service_principal_id}: {e}')
+            return []
+
+    async def get_service_principal_oauth2_permission_grants(self, service_principal_id):
+        """
+        Delegated permission grants (consent) where this service principal is the client.
+        """
+        try:
+            grant_filter = f'?$filter=clientId+eq+%27{service_principal_id}%27'
+            return await self._get_microsoft_graph_response_paginated('oauth2PermissionGrants' + grant_filter)
+        except Exception as e:
+            print_exception(
+                f'Failed to retrieve oauth2 permission grants for service principal {service_principal_id}: {e}')
+            return []
+
+    async def get_directory_roles(self):
+        """
+        Only ACTIVATED directory roles are returned by /directoryRoles (Entra AD only
+        activates a role template the first time it is assigned to someone).
+        """
+        try:
+            return await self._get_microsoft_graph_response_paginated('directoryRoles')
+        except Exception as e:
+            print_exception(f'Failed to retrieve directory roles: {e}')
+            return []
+
+    async def get_directory_role_members(self, directory_role_id):
+        try:
+            return await self._get_microsoft_graph_response_paginated(
+                f'directoryRoles/{directory_role_id}/members')
+        except Exception as e:
+            print_exception(f'Failed to retrieve members for directory role {directory_role_id}: {e}')
             return []

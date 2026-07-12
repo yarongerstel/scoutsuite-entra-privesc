@@ -4,6 +4,7 @@ from ScoutSuite.core.console import print_exception
 
 from ScoutSuite.providers.base.provider import BaseProvider
 from ScoutSuite.providers.azure.services import AzureServicesConfig
+from ScoutSuite.providers.azure import entra_privesc
 
 
 class AzureProvider(BaseProvider):
@@ -74,8 +75,30 @@ class AzureProvider(BaseProvider):
         # Don't do this if we're running a local execution
         if not self.last_run:
             self._match_rbac_roles_and_principals()
+            self._compute_entra_privesc_checks()
 
         super().preprocessing()
+
+    def _compute_entra_privesc_checks(self):
+        """
+        Computes the two Entra ID privilege-escalation cross-resource checks (see
+        ScoutSuite.providers.azure.entra_privesc for details): App Registration
+        owner-vs-granted-permissions, and Enterprise Application strong subscription roles.
+        """
+        try:
+            if 'aad' in self.service_list:
+                entra_privesc.compute_app_owner_privilege_escalation(
+                    applications=self.services['aad']['applications'],
+                    service_principals=self.services['aad']['service_principals'],
+                    directory_roles=self.services['aad']['directory_roles'])
+
+            if 'aad' in self.service_list and 'rbac' in self.service_list:
+                table = entra_privesc.compute_enterprise_app_subscription_privilege_table(
+                    service_principals=self.services['aad']['service_principals'],
+                    rbac_subscriptions=self.services['rbac']['subscriptions'])
+                self.services['aad']['enterprise_apps_with_strong_subscription_roles'] = table
+        except Exception as e:
+            print_exception(f'Unable to compute Entra privilege escalation checks: {e}')
 
     def _match_rbac_roles_and_principals(self):
         """

@@ -1,0 +1,21 @@
+{
+    "description": "App Registration Owner Has Weaker Directory Role Than the Application's Granted Permissions",
+    "rationale": "An App Registration's owner(s) can add credentials (client secrets/certificates) to the app and authenticate as it, inheriting whatever Microsoft Graph Application permissions the app has been granted - regardless of the owner's own directory role. If an app has been granted permissions (e.g. RoleManagement.ReadWrite.Directory, Application.ReadWrite.All, Directory.ReadWrite.All) that outrank the highest Entra directory role held by any of its owners, an owner (or anyone who compromises an owner account) can use the app as a stepping stone to escalate to a higher privilege level than they were assigned, such as Global Administrator.",
+    "remediation": "Review the owners of the flagged application. Either remove owners who should not be able to wield the app's permissions, reduce the application's granted Microsoft Graph permissions to only what it needs (least privilege), or ensure only sufficiently privileged/trusted principals (ideally with Privileged Role Administrator or Global Administrator oversight) can own highly-permissioned applications. Consider using Privileged Identity Management (PIM) for Groups on any group used to own applications.",
+    "references": [
+        "https://learn.microsoft.com/en-us/entra/identity-platform/security-best-practices-for-app-registration",
+        "https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/best-practices",
+        "https://posts.specterops.io/azure-privilege-escalation-via-azure-api-permissions-abuse-74aee1006f48"
+    ],
+    "dashboard_name": "Applications",
+    "path": "aad.applications.id",
+    "conditions": [
+        "and",
+        [
+            "aad.applications.id.owner_weaker_than_app_permissions",
+            "true",
+            ""
+        ]
+    ],
+    "id_suffix": "owner_weaker_than_app_permissions"
+}

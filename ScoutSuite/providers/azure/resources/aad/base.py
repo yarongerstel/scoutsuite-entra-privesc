@@ -6,6 +6,7 @@ from .groups import Groups
 from .serviceprincipals import ServicePrincipals
 from .applications import Applications
 from .policies import Policies
+from .directoryroles import DirectoryRoles
 
 
 class AAD(AzureCompositeResources):
@@ -14,7 +15,8 @@ class AAD(AzureCompositeResources):
         (Groups, 'groups'),
         (ServicePrincipals, 'service_principals'),
         (Applications, 'applications'),
-        (Policies, 'policies')
+        (Policies, 'policies'),
+        (DirectoryRoles, 'directory_roles')
     ]
 
     async def fetch_all(self):

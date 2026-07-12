@@ -13,6 +13,18 @@
                 "level": "danger"
             }
         ],
+        "aad-app-registration-owner-weaker-than-permissions.json": [
+            {
+                "enabled": true,
+                "level": "danger"
+            }
+        ],
+        "aad-enterprise-app-strong-subscription-role.json": [
+            {
+                "enabled": true,
+                "level": "warning"
+            }
+        ],
         "appservice-authentication-disabled.json": [
             {
                 "enabled": true,

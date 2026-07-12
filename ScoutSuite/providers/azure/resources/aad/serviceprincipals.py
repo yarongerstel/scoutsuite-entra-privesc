@@ -1,4 +1,5 @@
 from ScoutSuite.providers.azure.resources.base import AzureResources
+from ScoutSuite.providers.azure.resources.aad.owners import normalize_owners
 
 
 class ServicePrincipals(AzureResources):
@@ -39,6 +40,35 @@ class ServicePrincipals(AzureResources):
         service_principal_dict['tags'] = raw_service_principal.get('tags')
 
         service_principal_dict['roles'] = []  # this will be filled in `finalize()`
+
+        raw_owners = await self.facade.aad.get_service_principal_owners(service_principal_dict['id'])
+        service_principal_dict['owners'] = normalize_owners(raw_owners)
+
+        # Application (API) permissions actually granted to this app, e.g. Microsoft Graph
+        # app roles such as Directory.ReadWrite.All - the "permissions the app received".
+        raw_app_role_assignments = await self.facade.aad.get_service_principal_app_role_assignments(
+            service_principal_dict['id'])
+        service_principal_dict['granted_app_role_assignments'] = [
+            {
+                'id': assignment.get('id'),
+                'app_role_id': assignment.get('appRoleId'),
+                'resource_id': assignment.get('resourceId'),
+                'resource_display_name': assignment.get('resourceDisplayName'),
+            }
+            for assignment in raw_app_role_assignments or []
+        ]
+
+        raw_oauth2_permission_grants = await self.facade.aad.get_service_principal_oauth2_permission_grants(
+            service_principal_dict['id'])
+        service_principal_dict['granted_oauth2_permission_grants'] = [
+            {
+                'id': grant.get('id'),
+                'resource_id': grant.get('resourceId'),
+                'consent_type': grant.get('consentType'),
+                'scope': grant.get('scope'),
+            }
+            for grant in raw_oauth2_permission_grants or []
+        ]
 
         return service_principal_dict['id'], service_principal_dict
 

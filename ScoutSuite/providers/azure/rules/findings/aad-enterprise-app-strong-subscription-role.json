@@ -1,0 +1,20 @@
+{
+    "description": "Enterprise Application (Service Principal) Holds a Strong Role on a Subscription",
+    "rationale": "An Enterprise Application (Service Principal) that holds a strong Azure RBAC role (Owner, Contributor, User Access Administrator, or a custom role granting similarly broad/wildcard actions) directly at subscription scope can control or take over resources - and potentially other identities - within that subscription. Anyone who can add credentials to, or is an owner of, that Service Principal's application effectively inherits this subscription-level power. Review who owns/manages each flagged application and whether the assigned role is actually needed.",
+    "remediation": "Apply least privilege: replace broad built-in roles (Owner/Contributor/User Access Administrator) assigned to service principals with narrower built-in or custom roles scoped to only the actions and resources the application needs. Restrict who can own or manage credentials for applications holding subscription-level roles, and monitor/rotate their credentials regularly.",
+    "references": [
+        "https://learn.microsoft.com/en-us/azure/role-based-access-control/best-practices",
+        "https://learn.microsoft.com/en-us/entra/identity-platform/security-best-practices-for-app-registration"
+    ],
+    "dashboard_name": "Enterprise Applications With Strong Subscription Roles",
+    "path": "aad.enterprise_apps_with_strong_subscription_roles.id",
+    "conditions": [
+        "and",
+        [
+            "aad.enterprise_apps_with_strong_subscription_roles.id.role_name",
+            "notEmpty",
+            ""
+        ]
+    ],
+    "id_suffix": "strong_subscription_role"
+}

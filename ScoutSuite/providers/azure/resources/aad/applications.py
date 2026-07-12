@@ -1,4 +1,5 @@
 from ScoutSuite.providers.azure.resources.base import AzureResources
+from ScoutSuite.providers.azure.resources.aad.owners import normalize_owners
 
 
 class Applications(AzureResources):
@@ -46,4 +47,8 @@ class Applications(AzureResources):
         # application_dict['saml_metadata_url'] = raw_application.saml_metadata_url
         application_dict['sign_in_audience'] = raw_application.get('signInAudience')
         application_dict['www_homepage'] = raw_application['web'].get('homePageUrl')
+
+        raw_owners = await self.facade.aad.get_application_owners(application_dict['id'])
+        application_dict['owners'] = normalize_owners(raw_owners)
+
         return application_dict['id'], application_dict
