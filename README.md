@@ -1,3 +1,5 @@
+> **Fork notice**: this repository is a fork of [nccgroup/ScoutSuite](https://github.com/nccgroup/ScoutSuite) (based on release `5.14.0`, the latest at fork time), extended with additional Azure AD / Entra ID checks for App Registration and Enterprise Application privilege-escalation risk. See [`docs/entra-privesc-checks.md`](docs/entra-privesc-checks.md) for details on the added checks, required Graph API permissions, and known limitations/assumptions.
+
 <p align="center">
   <img src="https://user-images.githubusercontent.com/4206926/49877604-10457580-fe26-11e8-92d7-cd876c4f6454.png" width=350/>
 </p>
