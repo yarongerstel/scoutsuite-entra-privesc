@@ -1,0 +1,1 @@
+# scoutsuite-entra-privesc
