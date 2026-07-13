@@ -28,6 +28,26 @@ class AADFacade:
             self._graph_semaphore = asyncio.Semaphore(GRAPH_MAX_CONCURRENCY)
         return self._graph_semaphore
 
+    @staticmethod
+    def _extract_graph_error_message(response):
+        """
+        Microsoft Graph error responses carry the actual reason in the JSON body
+        (error.code / error.message) - e.g. 'Insufficient privileges to complete the operation.'
+        for a missing permission/consent, vs. a license-specific message when a feature (like PIM)
+        requires an Entra ID P2 license. The HTTP status code alone (403) cannot distinguish these,
+        so surface the body whenever we can parse it.
+        """
+        try:
+            body = response.json()
+            error = body.get('error', {})
+            code = error.get('code')
+            message = error.get('message')
+            if code or message:
+                return f'{code}: {message}' if code and message else (code or message)
+        except Exception:
+            pass
+        return None
+
     async def _graph_get(self, client, endpoint):
         """
         Perform a single Graph GET in the thread-pool executor, bounded by the concurrency
@@ -61,8 +81,10 @@ class AADFacade:
             elif response.status_code == 404:
                 return {}
             else:
-                print_exception('Failed to query Microsoft Graph endpoint \"{}\": status code {}'.
-                                format(api_resource, response.status_code))
+                error_message = self._extract_graph_error_message(response)
+                print_exception('Failed to query Microsoft Graph endpoint \"{}\": status code {}{}'.
+                                format(api_resource, response.status_code,
+                                       f' - {error_message}' if error_message else ''))
                 return {}
         except Exception as e:
             print_exception('Failed to query Microsoft Graph endpoint \"{}\": {}'.format(api_resource, e))
@@ -93,12 +115,17 @@ class AADFacade:
                 elif response.status_code == 404:
                     break
                 elif optional_note:
+                    error_message = self._extract_graph_error_message(response)
                     print_info('Optional Microsoft Graph data not available for \"{}\" (status code '
-                               '{}). {}'.format(api_resource, response.status_code, optional_note))
+                               '{}{}). {}'.format(
+                                   api_resource, response.status_code,
+                                   f' - {error_message}' if error_message else '', optional_note))
                     break
                 else:
-                    print_exception('Failed to query Microsoft Graph endpoint \"{}\": status code {}'.
-                                    format(api_resource, response.status_code))
+                    error_message = self._extract_graph_error_message(response)
+                    print_exception('Failed to query Microsoft Graph endpoint \"{}\": status code {}{}'.
+                                    format(api_resource, response.status_code,
+                                           f' - {error_message}' if error_message else ''))
                     break
         except Exception as e:
             print_exception('Failed to query Microsoft Graph endpoint \"{}\": {}'.format(api_resource, e))
