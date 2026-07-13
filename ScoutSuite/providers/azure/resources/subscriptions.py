@@ -16,8 +16,13 @@ class Subscriptions(AzureCompositeResources):
         raw_subscriptions = await self.facade.get_subscriptions()
 
         if raw_subscriptions:
-            self['subscriptions'] = {subscription.subscription_id: {}
-                                     for subscription in raw_subscriptions}
+            self['subscriptions'] = {
+                subscription.subscription_id: {
+                    'display_name': subscription.display_name,
+                    'tags': dict(subscription.tags) if subscription.tags else {},
+                }
+                for subscription in raw_subscriptions
+            }
         else:
             self['subscriptions'] = {}
         await self._fetch_children_of_all_resources(

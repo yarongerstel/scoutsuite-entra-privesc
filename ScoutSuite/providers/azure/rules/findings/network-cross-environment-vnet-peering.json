@@ -1,0 +1,21 @@
+{
+    "description": "Virtual Network Peering Connects Different Environments (e.g. Dev/Test/Production)",
+    "rationale": "This active VNet Peering connects two subscriptions that were classified into DIFFERENT environments (for example one 'production' and the other 'development' or 'test') based on their subscription names/tags. Mixing environments over the network breaks the isolation that separate environments are meant to provide: a compromise, misconfiguration, or bug in a lower-trust environment (dev/test/staging) can directly reach production resources over this peering, and data or credentials can flow between environments that are normally expected to be independent. This is the specific case of cross-subscription connectivity that segregation between environments is meant to prevent.",
+    "remediation": "Remove the peering between the production and non-production subscriptions, or replace direct connectivity with a controlled, narrowly-scoped path (e.g. a reviewed API gateway, a jump/bastion host with strict access control, or a dedicated interconnection subscription with firewalling) if cross-environment access is genuinely required for a specific purpose. Environments intended to be isolated (dev, test, staging, production) should not share direct network reachability.",
+    "references": [
+        "https://learn.microsoft.com/en-us/azure/virtual-network/virtual-network-peering-overview",
+        "https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/landing-zone/design-area/network-topology-and-connectivity",
+        "https://learn.microsoft.com/en-us/security/benchmark/azure/mcsb-network-security"
+    ],
+    "dashboard_name": "Cross-Subscription VNet Peerings",
+    "path": "network.cross_subscription_vnet_peerings.id",
+    "conditions": [
+        "and",
+        [
+            "network.cross_subscription_vnet_peerings.id.is_cross_environment",
+            "true",
+            ""
+        ]
+    ],
+    "id_suffix": "cross_environment_vnet_peering"
+}

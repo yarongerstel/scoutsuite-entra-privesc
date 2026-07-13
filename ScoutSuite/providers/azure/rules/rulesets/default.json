@@ -310,6 +310,18 @@
                 "level": "warning"
             }
         ],
+        "network-cross-subscription-vnet-peering.json": [
+            {
+                "enabled": true,
+                "level": "warning"
+            }
+        ],
+        "network-cross-environment-vnet-peering.json": [
+            {
+                "enabled": true,
+                "level": "danger"
+            }
+        ],
         "postgresql-database-servers-allow-any-ip.json": [
             {
                 "enabled": true,

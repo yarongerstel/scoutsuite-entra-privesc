@@ -165,6 +165,10 @@
         "watchers": {
           "cols": 2,
           "path": "services.network.subscriptions.id.watchers"
+        },
+        "cross_subscription_vnet_peerings": {
+          "cols": 2,
+          "path": "services.network.cross_subscription_vnet_peerings"
         }
       }
     },

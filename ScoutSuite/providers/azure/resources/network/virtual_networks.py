@@ -1,7 +1,7 @@
 from ScoutSuite.providers.azure.facade.base import AzureFacade
 from ScoutSuite.providers.azure.resources.base import AzureResources
 from ScoutSuite.providers.utils import get_non_provider_id
-from ScoutSuite.providers.azure.utils import get_resource_group_name
+from ScoutSuite.providers.azure.utils import get_resource_group_name, get_subscription_id, get_resource_name
 
 
 class VirtualNetworks(AzureResources):
@@ -27,7 +27,8 @@ class VirtualNetworks(AzureResources):
         else:
             virtual_network_dict['tags'] = []
         virtual_network_dict['resource_group_name'] = get_resource_group_name(raw_virtual_network.id)
-        virtual_network_dict['virtual_network_peerings'] = raw_virtual_network.virtual_network_peerings
+        virtual_network_dict['virtual_network_peerings'] = \
+            self._parse_peerings(raw_virtual_network.virtual_network_peerings)
         virtual_network_dict['enable_ddos_protection'] = raw_virtual_network.enable_ddos_protection
         virtual_network_dict['resource_guid'] = raw_virtual_network.resource_guid
         virtual_network_dict['provisioning_state'] = raw_virtual_network.provisioning_state
@@ -68,3 +69,32 @@ class VirtualNetworks(AzureResources):
             virtual_network_dict['subnets'][subnet_dict['id']] = subnet_dict
 
         return virtual_network_dict['id'], virtual_network_dict
+
+    def _parse_peerings(self, raw_peerings):
+        """
+        VNet peerings are returned inline on the parent VirtualNetwork (no separate list-all API).
+        Parsed into plain dicts (rather than left as raw SDK objects, which nothing else in
+        ScoutSuite consumed) so cross-subscription/cross-environment network segregation checks
+        can use them. remote_virtual_network is a SubResource whose .id is the full ARM resource
+        ID of the peered VNet, e.g. '/subscriptions/{sub}/resourceGroups/{rg}/providers/
+        Microsoft.Network/virtualNetworks/{name}' - parsed here into its subscription/name parts.
+        """
+        peerings = []
+        for raw_peering in raw_peerings or []:
+            remote_vnet_id = raw_peering.remote_virtual_network.id if raw_peering.remote_virtual_network else None
+            peerings.append({
+                'id': get_non_provider_id(raw_peering.id) if raw_peering.id else None,
+                'name': raw_peering.name,
+                'peering_state': str(raw_peering.peering_state) if raw_peering.peering_state else None,
+                'allow_virtual_network_access': raw_peering.allow_virtual_network_access,
+                'allow_forwarded_traffic': raw_peering.allow_forwarded_traffic,
+                'allow_gateway_transit': raw_peering.allow_gateway_transit,
+                'use_remote_gateways': raw_peering.use_remote_gateways,
+                'remote_virtual_network_id': remote_vnet_id,
+                'remote_subscription_id': get_subscription_id(remote_vnet_id),
+                'remote_resource_group_name': get_resource_group_name(remote_vnet_id) if remote_vnet_id else None,
+                'remote_virtual_network_name': get_resource_name(remote_vnet_id),
+                'remote_address_prefixes': raw_peering.remote_address_space.address_prefixes
+                    if raw_peering.remote_address_space else [],
+            })
+        return peerings

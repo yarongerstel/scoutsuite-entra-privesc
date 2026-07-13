@@ -5,6 +5,7 @@ from ScoutSuite.core.console import print_exception
 from ScoutSuite.providers.base.provider import BaseProvider
 from ScoutSuite.providers.azure.services import AzureServicesConfig
 from ScoutSuite.providers.azure import entra_privesc
+from ScoutSuite.providers.azure import network_segregation
 
 
 class AzureProvider(BaseProvider):
@@ -76,8 +77,23 @@ class AzureProvider(BaseProvider):
         if not self.last_run:
             self._match_rbac_roles_and_principals()
             self._compute_entra_privesc_checks()
+            self._compute_network_segregation_checks()
 
         super().preprocessing()
+
+    def _compute_network_segregation_checks(self):
+        """
+        Computes cross-subscription VNet peering / environment-segregation checks (see
+        ScoutSuite.providers.azure.network_segregation for details).
+        """
+        try:
+            if 'network' in self.service_list:
+                table = network_segregation.compute_cross_subscription_vnet_peerings(
+                    network_subscriptions=self.services['network']['subscriptions'])
+                self.services['network']['cross_subscription_vnet_peerings'] = table
+                self.services['network']['cross_subscription_vnet_peerings_count'] = len(table)
+        except Exception as e:
+            print_exception(f'Unable to compute network segregation checks: {e}')
 
     def _compute_entra_privesc_checks(self):
         """

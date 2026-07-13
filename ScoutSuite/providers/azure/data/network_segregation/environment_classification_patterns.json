@@ -1,0 +1,10 @@
+{
+  "_comment": "Curated, approximate heuristic for classifying an Azure subscription's environment (production / staging / test / development) from its display name and/or an 'environment'-style tag. Azure has no built-in environment taxonomy; this matches the common enterprise convention of one subscription per environment. A subscription whose display name (or tag) matches none of these patterns is classified 'unknown' and is never treated as different from another 'unknown' - this can under-report cross-environment connectivity, it will never fabricate a mismatch on a guess. Patterns are matched as case-insensitive substrings against the display name and against the values of any of tag_keys_checked.",
+  "tag_keys_checked": ["environment", "env", "stage"],
+  "environment_patterns": {
+    "production": ["prod", "prd", "production", "live"],
+    "staging": ["stage", "staging", "stg", "preprod", "pre-prod", "uat"],
+    "test": ["test", "tst", "qa", "sandbox", "sbx"],
+    "development": ["dev", "development", "poc"]
+  }
+}

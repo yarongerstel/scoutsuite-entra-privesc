@@ -6,27 +6,51 @@ Handoff notes for this fork of [ScoutSuite](https://github.com/nccgroup/ScoutSui
 ## What this fork adds
 
 ### Azure / Entra ID privilege-escalation checks
-See [`entra-privesc-checks.md`](entra-privesc-checks.md) for the full write-up. Eight findings,
+See [`entra-privesc-checks.md`](entra-privesc-checks.md) for the full write-up. Twelve findings,
 all wired into `providers/azure/rules/rulesets/default.json`:
 
 | Finding file (in `providers/azure/rules/findings/`) | Level |
 |---|---|
 | `aad-app-registration-owner-weaker-than-permissions` | danger |
+| `aad-app-registration-owner-escalates-to-subscription` | danger |
 | `aad-service-principal-owner-weaker-than-permissions` | danger |
 | `aad-service-principal-dangerous-permission-combination` | danger |
 | `aad-app-federated-credential-broad` | danger |
 | `aad-guest-user-strong-role` | danger |
 | `aad-user-strong-subscription-but-weak-directory` | danger |
+| `aad-standing-privileged-subscription-role-assignment` | danger |
 | `aad-enterprise-app-strong-subscription-role` | warning |
 | `aad-managed-identity-strong-subscription-role` | warning |
 
 Key code:
 - Fetching: `providers/azure/facade/aad.py` (owners, appRoleAssignments, oauth2 grants, directory
-  roles, federated identity credentials), `providers/azure/resources/aad/` (applications,
-  serviceprincipals, directoryroles, owners helper).
+  roles, PIM eligibility schedules, federated identity credentials), `providers/azure/resources/aad/`
+  (applications, serviceprincipals, directoryroles, roleeligibility, owners helper).
 - Correlation: `providers/azure/entra_privesc.py` (all cross-resource logic), invoked from
   `AzureProvider.preprocessing()` → `_compute_entra_privesc_checks()` in `providers/azure/provider.py`.
 - Curated data (heuristics, tune these): `providers/azure/data/entra_privesc/*.json`.
+- Known real bugs fixed along the way (worth knowing about if debugging odd results): Azure ARM's
+  role-assignment API can report `principalType: 'Unknown'` for a genuine Service Principal - match
+  by principal ID against fetched objects instead of trusting that field (see
+  `compute_enterprise_app_subscription_privilege_table` / `compute_standing_privileged_subscription_assignments`).
+
+### Azure network segregation checks
+See [`network-segregation-checks.md`](network-segregation-checks.md) for the full write-up. Two
+findings on `services.network.cross_subscription_vnet_peerings`:
+
+| Finding file | Level |
+|---|---|
+| `network-cross-subscription-vnet-peering` | warning |
+| `network-cross-environment-vnet-peering` (dev/test/prod mixing) | danger |
+
+Key code: `providers/azure/network_segregation.py` (environment classification + cross-subscription
+VNet Peering correlation), invoked from `AzureProvider.preprocessing()` →
+`_compute_network_segregation_checks()`. VNet Peerings, previously fetched as unparsed raw SDK
+objects nothing used, are now parsed in `resources/network/virtual_networks.py`. Subscription
+`display_name`/`tags` (needed to classify environment) are captured in `resources/subscriptions.py`
+- shared by every `Subscriptions`-based service, not just `network`. Curated environment-name
+patterns: `providers/azure/data/network_segregation/environment_classification_patterns.json`.
+Only native VNet Peering is covered (not VPN Gateway/ExpressRoute/vWAN) - documented v1 scope limit.
 
 ### AWS improvements
 - **VPC-aware subnet flow-log check** (`AWSProvider._set_subnet_effective_flow_logs`):

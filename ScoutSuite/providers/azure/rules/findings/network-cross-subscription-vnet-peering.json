@@ -1,0 +1,20 @@
+{
+    "description": "Virtual Network Peered Across Subscriptions",
+    "rationale": "This Virtual Network is peered (an active, 'Connected' VNet Peering) to a Virtual Network in a DIFFERENT Azure subscription. A VNet Peering allows network traffic to flow directly between the two networks (subject to allow_virtual_network_access and any NSGs/route tables), effectively merging their address spaces from a connectivity standpoint. Cross-subscription connectivity is common and often intentional in hub-and-spoke architectures, so this is reported at low/informational severity to establish visibility over the tenant's network topology - review each entry and confirm it is an intended, documented connection rather than an unreviewed or forgotten one.",
+    "remediation": "Confirm this peering is intentional and documented (e.g. a hub-spoke connectivity subscription). Remove any peering that is not needed. Where possible, restrict what the peering actually allows (disable allow_virtual_network_access / allow_forwarded_traffic / use_remote_gateways if not required) and use NSGs to further limit which traffic can actually cross the peering.",
+    "references": [
+        "https://learn.microsoft.com/en-us/azure/virtual-network/virtual-network-peering-overview",
+        "https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/networking"
+    ],
+    "dashboard_name": "Cross-Subscription VNet Peerings",
+    "path": "network.cross_subscription_vnet_peerings.id",
+    "conditions": [
+        "and",
+        [
+            "network.cross_subscription_vnet_peerings.id.peering_name",
+            "notEmpty",
+            ""
+        ]
+    ],
+    "id_suffix": "cross_subscription_vnet_peering"
+}
