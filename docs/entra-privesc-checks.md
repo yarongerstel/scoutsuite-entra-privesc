@@ -184,6 +184,13 @@ want to scope credentials more tightly:
 | `GET /oauth2PermissionGrants?$filter=clientId eq ...` | `DelegatedPermissionGrant.Read.All` (or `Directory.Read.All`) |
 | `GET /directoryRoles` and `.../members` | `RoleManagement.Read.Directory` (or `Directory.Read.All`) |
 | `GET /applications/{id}/federatedIdentityCredentials` | `Application.Read.All` (or `Directory.Read.All`) |
+| `GET /roleManagement/directory/roleEligibilityScheduleInstances` (PIM) | `RoleManagement.Read.Directory` (or `Directory.Read.All`) **and an Entra ID P2 license** |
+
+> **PIM eligibility is optional and degrades gracefully.** The last row (PIM-eligible directory
+> roles) requires an Entra ID **P2** license *and* role-management read access. If it returns 403
+> (no P2, or the run identity lacks the permission) the scan logs a single informational line and
+> continues using **active** directory-role assignments only - nothing else is affected. Note that
+> without P2 there are no eligible assignments to read anyway, so active-only is already complete.
 
 As with the rest of ScoutSuite's Azure AD module, these are **read-only** application permissions
 granted to the service principal ScoutSuite authenticates as - running these checks does not

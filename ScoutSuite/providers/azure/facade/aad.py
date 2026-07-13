@@ -3,7 +3,7 @@ import os
 
 from msgraph.core import GraphClient
 
-from ScoutSuite.core.console import print_exception
+from ScoutSuite.core.console import print_exception, print_info
 from ScoutSuite.providers.utils import run_concurrently
 
 # Microsoft Graph throttles per-app/per-tenant, and the limits are not published as a fixed
@@ -68,10 +68,15 @@ class AADFacade:
             print_exception('Failed to query Microsoft Graph endpoint \"{}\": {}'.format(api_resource, e))
             return {}
 
-    async def _get_microsoft_graph_response_paginated(self, api_resource, api_version='v1.0'):
+    async def _get_microsoft_graph_response_paginated(self, api_resource, api_version='v1.0',
+                                                      optional_note=None):
         """
         Same as _get_microsoft_graph_response() but follows @odata.nextLink until exhausted,
         since owners/appRoleAssignments/role members collections can exceed a single page.
+
+        When `optional_note` is set, a non-200 response is treated as an expected, non-fatal
+        "this data is optional / may not be accessible" case: it is logged at info level with the
+        note (instead of an alarming error) and an empty result is returned.
         """
         scopes = ['https://graph.microsoft.com/.default']
         client = GraphClient(credential=self.credentials.get_credentials(), scopes=scopes)
@@ -86,6 +91,10 @@ class AADFacade:
                     values.extend(response_json.get('value', []))
                     endpoint = response_json.get('@odata.nextLink')
                 elif response.status_code == 404:
+                    break
+                elif optional_note:
+                    print_info('Optional Microsoft Graph data not available for \"{}\" (status code '
+                               '{}). {}'.format(api_resource, response.status_code, optional_note))
                     break
                 else:
                     print_exception('Failed to query Microsoft Graph endpoint \"{}\": status code {}'.
@@ -252,7 +261,10 @@ class AADFacade:
         """
         try:
             return await self._get_microsoft_graph_response_paginated(
-                'roleManagement/directory/roleEligibilityScheduleInstances?$expand=roleDefinition')
+                'roleManagement/directory/roleEligibilityScheduleInstances?$expand=roleDefinition',
+                optional_note='PIM eligibility read requires RoleManagement.Read.Directory (or '
+                              'Directory.Read.All) and an Entra ID P2 license. Continuing with '
+                              'active directory-role assignments only.')
         except Exception as e:
             print_exception(f'Failed to retrieve directory role eligibility schedule instances: {e}')
             return []
