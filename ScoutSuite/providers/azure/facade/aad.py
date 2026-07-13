@@ -289,8 +289,11 @@ class AADFacade:
         try:
             return await self._get_microsoft_graph_response_paginated(
                 'roleManagement/directory/roleEligibilityScheduleInstances?$expand=roleDefinition',
-                optional_note='PIM eligibility read requires RoleManagement.Read.Directory (or '
-                              'Directory.Read.All) and an Entra ID P2 license. Continuing with '
+                optional_note='PIM eligibility read requires one of RoleEligibilitySchedule.Read.'
+                              'Directory / RoleManagement.Read.Directory / RoleManagement.Read.All '
+                              '(NOT satisfied by Directory.Read.All), an Entra ID P2 license, and '
+                              '(for delegated auth) a scope Azure CLI\'s own app may not be able to '
+                              'request at all - see docs/entra-privesc-checks.md. Continuing with '
                               'active directory-role assignments only.')
         except Exception as e:
             print_exception(f'Failed to retrieve directory role eligibility schedule instances: {e}')
