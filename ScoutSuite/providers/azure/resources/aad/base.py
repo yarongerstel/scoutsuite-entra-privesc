@@ -7,6 +7,7 @@ from .serviceprincipals import ServicePrincipals
 from .applications import Applications
 from .policies import Policies
 from .directoryroles import DirectoryRoles
+from .roleeligibility import RoleEligibilitySchedules
 
 
 class AAD(AzureCompositeResources):
@@ -16,7 +17,8 @@ class AAD(AzureCompositeResources):
         (ServicePrincipals, 'service_principals'),
         (Applications, 'applications'),
         (Policies, 'policies'),
-        (DirectoryRoles, 'directory_roles')
+        (DirectoryRoles, 'directory_roles'),
+        (RoleEligibilitySchedules, 'role_eligibility_schedules')
     ]
 
     async def fetch_all(self):

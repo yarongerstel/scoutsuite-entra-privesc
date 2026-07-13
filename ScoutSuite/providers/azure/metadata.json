@@ -76,6 +76,10 @@
           "cols": 2,
           "path": "services.aad.directory_roles"
         },
+        "role_eligibility_schedules": {
+          "cols": 2,
+          "path": "services.aad.role_eligibility_schedules"
+        },
         "enterprise_apps_with_strong_subscription_roles": {
           "cols": 4,
           "path": "services.aad.enterprise_apps_with_strong_subscription_roles"

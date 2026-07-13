@@ -154,8 +154,27 @@ def _granted_graph_permissions(granted_app_role_assignments):
     return max_tier, sorted(set(names))
 
 
-def _principal_directory_role_tier(principal_id, directory_roles):
-    """Highest directory-role privilege tier held by a given principal (user or SP) id."""
+def build_eligible_directory_roles_by_principal(role_eligibility_schedules):
+    """
+    Builds {principal_id: set(role display names)} from the PIM directory-role eligibility
+    schedule instances, so a principal who is *eligible* for a privileged role (e.g. can activate
+    Global Administrator on demand) is counted as holding that role's privilege - not treated as
+    weak just because the role is not currently active under /directoryRoles.
+    """
+    result = {}
+    for instance in (role_eligibility_schedules or {}).values():
+        principal_id = instance.get('principal_id')
+        role_name = instance.get('role_name')
+        if principal_id and role_name:
+            result.setdefault(principal_id, set()).add(role_name)
+    return result
+
+
+def _principal_directory_role_tier(principal_id, directory_roles, eligible_roles_by_principal=None):
+    """
+    Highest directory-role privilege tier held by a given principal (user or SP) id, counting
+    both currently-active assignments (/directoryRoles members) and PIM-eligible assignments.
+    """
     best_tier = _DIRECTORY_ROLE_DEFAULT_TIER
     held_roles = []
     for directory_role in directory_roles.values():
@@ -163,15 +182,19 @@ def _principal_directory_role_tier(principal_id, directory_roles):
             if member.get('id') == principal_id:
                 held_roles.append(directory_role.get('name'))
                 best_tier = max(best_tier, get_directory_role_tier(directory_role.get('name')))
+    for role_name in sorted((eligible_roles_by_principal or {}).get(principal_id, ())):
+        held_roles.append(f'{role_name} (PIM eligible)')
+        best_tier = max(best_tier, get_directory_role_tier(role_name))
     return best_tier, held_roles
 
 
-def _max_owner_directory_role(owners, directory_roles):
+def _max_owner_directory_role(owners, directory_roles, eligible_roles_by_principal=None):
     """Returns (max_tier, per-owner detail list) across an object's owners."""
     max_tier = _DIRECTORY_ROLE_DEFAULT_TIER
     owners_detail = []
     for owner in owners or []:
-        owner_tier, owner_roles = _principal_directory_role_tier(owner.get('id'), directory_roles)
+        owner_tier, owner_roles = _principal_directory_role_tier(
+            owner.get('id'), directory_roles, eligible_roles_by_principal)
         owners_detail.append({
             'id': owner.get('id'),
             'display_name': owner.get('display_name') or owner.get('user_principal_name'),
@@ -182,13 +205,14 @@ def _max_owner_directory_role(owners, directory_roles):
     return max_tier, owners_detail
 
 
-def compute_app_owner_privilege_escalation(applications, service_principals, directory_roles):
+def compute_app_owner_privilege_escalation(applications, service_principals, directory_roles,
+                                           eligible_roles_by_principal=None):
     """
     For each App Registration, compares the highest Microsoft Graph Application-permission risk
     tier granted to its corresponding Service Principal against the highest Entra directory-role
-    privilege tier held by any of its owners. Mutates each application dict with
-    granted_permissions[_risk_tier], max_owner_directory_role_tier, owners_directory_roles and
-    owner_weaker_than_app_permissions (bool).
+    privilege tier held by any of its owners (active or PIM-eligible). Mutates each application
+    dict with granted_permissions[_risk_tier], max_owner_directory_role_tier,
+    owners_directory_roles and owner_weaker_than_app_permissions (bool).
     """
     try:
         service_principal_by_app_id = {
@@ -203,7 +227,7 @@ def compute_app_owner_privilege_escalation(applications, service_principals, dir
             application['granted_permissions'] = granted_names
 
             max_owner_tier, owners_detail = _max_owner_directory_role(
-                application.get('owners'), directory_roles)
+                application.get('owners'), directory_roles, eligible_roles_by_principal)
             application['max_owner_directory_role_tier'] = max_owner_tier
             application['owners_directory_roles'] = owners_detail
 
@@ -214,7 +238,8 @@ def compute_app_owner_privilege_escalation(applications, service_principals, dir
         print_exception(f'Unable to compute app owner privilege escalation: {e}')
 
 
-def compute_sp_owner_privilege_escalation(service_principals, directory_roles):
+def compute_sp_owner_privilege_escalation(service_principals, directory_roles,
+                                          eligible_roles_by_principal=None):
     """
     Same idea as compute_app_owner_privilege_escalation but for Service Principals that have
     their own owners and their own granted permissions. Mutates each SP dict with
@@ -229,7 +254,7 @@ def compute_sp_owner_privilege_escalation(service_principals, directory_roles):
             sp['granted_permissions'] = granted_names
 
             max_owner_tier, owners_detail = _max_owner_directory_role(
-                sp.get('owners'), directory_roles)
+                sp.get('owners'), directory_roles, eligible_roles_by_principal)
             sp['max_owner_directory_role_tier'] = max_owner_tier
             sp['owners_directory_roles'] = owners_detail
 
@@ -327,19 +352,21 @@ def _user_strong_subscription_roles(user, rbac_subscriptions):
     return strong_sub_roles
 
 
-def compute_guest_strong_roles(users, directory_roles, rbac_subscriptions):
+def compute_guest_strong_roles(users, directory_roles, rbac_subscriptions,
+                               eligible_roles_by_principal=None):
     """
     Flags any guest user (userType == 'Guest') that holds a strong Entra directory role (tier
-    >= STRONG_GUEST_DIRECTORY_ROLE_TIER) or a strong Azure RBAC role at subscription scope.
-    Mutates each guest user dict with held_directory_roles, held_strong_subscription_roles and
-    guest_holds_strong_role (bool).
+    >= STRONG_GUEST_DIRECTORY_ROLE_TIER, active or PIM-eligible) or a strong Azure RBAC role at
+    subscription scope. Mutates each guest user dict with held_directory_roles,
+    held_strong_subscription_roles and guest_holds_strong_role (bool).
     """
     try:
         for user in users.values():
             if user.get('user_type') != 'Guest':
                 continue
 
-            dir_tier, held_roles = _principal_directory_role_tier(user.get('id'), directory_roles)
+            dir_tier, held_roles = _principal_directory_role_tier(
+                user.get('id'), directory_roles, eligible_roles_by_principal)
             user['held_directory_roles'] = held_roles
 
             strong_sub_roles = _user_strong_subscription_roles(user, rbac_subscriptions)
@@ -352,14 +379,17 @@ def compute_guest_strong_roles(users, directory_roles, rbac_subscriptions):
         print_exception(f'Unable to compute guest strong roles: {e}')
 
 
-def compute_users_strong_subscription_but_weak_directory(users, directory_roles, rbac_subscriptions):
+def compute_users_strong_subscription_but_weak_directory(users, directory_roles, rbac_subscriptions,
+                                                         eligible_roles_by_principal=None):
     """
     Flags any user who holds a strong Azure RBAC role at subscription scope while being a weak
     identity in the directory itself - i.e. their highest Entra directory role is at or below
-    WEAK_USER_DIRECTORY_ROLE_TIER (no admin role). Such users are powerful on the Azure control
-    plane despite being low-privileged in the directory, which concentrates blast radius on
-    ordinary accounts. Mutates each user dict with held_strong_subscription_roles,
-    directory_role_tier and strong_subscription_role_but_weak_directory (bool).
+    WEAK_USER_DIRECTORY_ROLE_TIER (no admin role). PIM-eligible directory roles count too, so a
+    user who is merely eligible to activate Global Administrator is NOT treated as weak. Such
+    users are powerful on the Azure control plane despite being low-privileged in the directory,
+    which concentrates blast radius on ordinary accounts. Mutates each user dict with
+    held_strong_subscription_roles, directory_role_tier and
+    strong_subscription_role_but_weak_directory (bool).
     """
     try:
         for user in users.values():
@@ -367,7 +397,8 @@ def compute_users_strong_subscription_but_weak_directory(users, directory_roles,
             # Preserve any value already set by the guest check (identical computation).
             user['held_strong_subscription_roles'] = strong_sub_roles
 
-            dir_tier, held_roles = _principal_directory_role_tier(user.get('id'), directory_roles)
+            dir_tier, held_roles = _principal_directory_role_tier(
+                user.get('id'), directory_roles, eligible_roles_by_principal)
             user.setdefault('held_directory_roles', held_roles)
             user['directory_role_tier'] = dir_tier
 

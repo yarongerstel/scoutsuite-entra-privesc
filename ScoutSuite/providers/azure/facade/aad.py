@@ -243,6 +243,20 @@ class AADFacade:
             print_exception(f'Failed to retrieve directory roles: {e}')
             return []
 
+    async def get_directory_role_eligibility_schedule_instances(self):
+        """
+        PIM 'eligible' directory role assignments - principals who can activate a directory role
+        (e.g. Global Administrator) on demand. These do NOT appear under /directoryRoles members
+        (which lists only currently-active assignments), so a PIM-eligible admin would otherwise
+        look like they hold no directory role. roleDefinition is expanded to get the role name.
+        """
+        try:
+            return await self._get_microsoft_graph_response_paginated(
+                'roleManagement/directory/roleEligibilityScheduleInstances?$expand=roleDefinition')
+        except Exception as e:
+            print_exception(f'Failed to retrieve directory role eligibility schedule instances: {e}')
+            return []
+
     async def get_directory_role_members(self, directory_role_id):
         try:
             return await self._get_microsoft_graph_response_paginated(

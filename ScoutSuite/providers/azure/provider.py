@@ -93,14 +93,22 @@ class AzureProvider(BaseProvider):
                 rbac_subscriptions = self.services['rbac']['subscriptions'] \
                     if 'rbac' in self.service_list else {}
 
+                # PIM-eligible directory roles (e.g. principals who can activate Global
+                # Administrator) so that eligibility counts toward directory privilege and an
+                # eligible admin is not mistaken for a weak identity.
+                eligible_roles_by_principal = entra_privesc.build_eligible_directory_roles_by_principal(
+                    aad.get('role_eligibility_schedules', {}))
+
                 entra_privesc.compute_app_owner_privilege_escalation(
                     applications=aad['applications'],
                     service_principals=aad['service_principals'],
-                    directory_roles=aad['directory_roles'])
+                    directory_roles=aad['directory_roles'],
+                    eligible_roles_by_principal=eligible_roles_by_principal)
 
                 entra_privesc.compute_sp_owner_privilege_escalation(
                     service_principals=aad['service_principals'],
-                    directory_roles=aad['directory_roles'])
+                    directory_roles=aad['directory_roles'],
+                    eligible_roles_by_principal=eligible_roles_by_principal)
 
                 # Must run after the owner-privesc functions, which populate granted_permissions
                 entra_privesc.compute_dangerous_permission_combinations(
@@ -113,12 +121,14 @@ class AzureProvider(BaseProvider):
                 entra_privesc.compute_guest_strong_roles(
                     users=aad['users'],
                     directory_roles=aad['directory_roles'],
-                    rbac_subscriptions=rbac_subscriptions)
+                    rbac_subscriptions=rbac_subscriptions,
+                    eligible_roles_by_principal=eligible_roles_by_principal)
 
                 entra_privesc.compute_users_strong_subscription_but_weak_directory(
                     users=aad['users'],
                     directory_roles=aad['directory_roles'],
-                    rbac_subscriptions=rbac_subscriptions)
+                    rbac_subscriptions=rbac_subscriptions,
+                    eligible_roles_by_principal=eligible_roles_by_principal)
 
             if 'aad' in self.service_list and 'rbac' in self.service_list:
                 table = entra_privesc.compute_enterprise_app_subscription_privilege_table(
