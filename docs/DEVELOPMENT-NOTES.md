@@ -90,6 +90,21 @@ description text is present. `textContent` (not `innerText`) sees collapsed acco
 - **Multi-hop Entra escalation** (owner → group → nested group → role): real value but needs a
   graph engine, not the single-hop JSON rule model — architectural, out of scope for this fork.
 
+## Performance / throttling (Azure AD fetch)
+
+The Entra checks add per-object Graph calls. `msgraph-core==0.2.2`'s `GraphClient` is synchronous
+(`requests`), so the facade runs each call in the thread-pool executor (`run_concurrently`) and the
+`resources/aad/*` fetchers fan out per-object with `map_concurrently`. Built-in `Microsoft Services`
+service principals are filtered out before the per-SP calls.
+
+Throttling is **automatic — no `--max-rate` needed**. In `facade/aad.py`, `_graph_get`:
+- caps concurrent Graph calls with a semaphore (`GRAPH_MAX_CONCURRENCY`, default 15, override via
+  `SCOUT_AZURE_GRAPH_MAX_CONCURRENCY`), and
+- retries HTTP 429 honouring the `Retry-After` header, so it self-throttles exactly as Graph asks.
+
+If you still want a hard request-rate ceiling, `scout azure --max-rate <N>` feeds ScoutSuite's
+loop throttler that `run_concurrently` already uses.
+
 ## Notes / gotchas
 
 - Curated risk tiers (`data/entra_privesc/*.json`) and the tier constants in `entra_privesc.py`

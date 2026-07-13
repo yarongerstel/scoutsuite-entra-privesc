@@ -1,14 +1,49 @@
+import asyncio
+import os
+
 from msgraph.core import GraphClient
 
 from ScoutSuite.core.console import print_exception
 from ScoutSuite.providers.utils import run_concurrently
+
+# Microsoft Graph throttles per-app/per-tenant, and the limits are not published as a fixed
+# number - so rather than asking the user to guess a `--max-rate`, the fetch self-throttles:
+#   1. A concurrency cap keeps the parallel fan-out to a safe number of in-flight Graph calls.
+#   2. HTTP 429 responses are retried honouring the `Retry-After` header Graph returns, so the
+#      fetch automatically slows down exactly as much as Graph asks, then speeds back up.
+# The cap can be overridden with SCOUT_AZURE_GRAPH_MAX_CONCURRENCY, but the default just works.
+GRAPH_MAX_CONCURRENCY = int(os.environ.get('SCOUT_AZURE_GRAPH_MAX_CONCURRENCY', '15'))
+GRAPH_MAX_THROTTLE_RETRIES = 5
 
 
 class AADFacade:
 
     def __init__(self, credentials):
         self.credentials = credentials
+        self._graph_semaphore = None
 
+    def _get_graph_semaphore(self):
+        # Created lazily so it binds to the running event loop (there is exactly one per scan).
+        if self._graph_semaphore is None:
+            self._graph_semaphore = asyncio.Semaphore(GRAPH_MAX_CONCURRENCY)
+        return self._graph_semaphore
+
+    async def _graph_get(self, client, endpoint):
+        """
+        Perform a single Graph GET in the thread-pool executor, bounded by the concurrency
+        semaphore and self-throttling on HTTP 429 by honouring the Retry-After header.
+        """
+        response = None
+        for attempt in range(GRAPH_MAX_THROTTLE_RETRIES + 1):
+            async with self._get_graph_semaphore():
+                response = await run_concurrently(lambda: client.get(endpoint))
+            if response.status_code == 429 and attempt < GRAPH_MAX_THROTTLE_RETRIES:
+                retry_after = response.headers.get('Retry-After') if hasattr(response, 'headers') else None
+                delay = int(retry_after) if retry_after and str(retry_after).isdigit() else 2 ** attempt
+                await asyncio.sleep(delay)
+                continue
+            return response
+        return response
 
     async def _get_microsoft_graph_response(self, api_resource, api_version='v1.0'):
         scopes = ['https://graph.microsoft.com/.default']
@@ -16,10 +51,10 @@ class AADFacade:
         client = GraphClient(credential=self.credentials.get_credentials(), scopes=scopes)
         endpoint = 'https://graph.microsoft.com/{}/{}'.format(api_version, api_resource)
         try:
-            # msgraph-core 0.2.2's GraphClient is synchronous (requests-based); run it in the
-            # thread-pool executor so the blocking HTTP call does not freeze the event loop and
-            # multiple Graph calls can run concurrently.
-            response = await run_concurrently(lambda: client.get(endpoint))
+            # msgraph-core 0.2.2's GraphClient is synchronous (requests-based); _graph_get runs
+            # it in the thread-pool executor (so the blocking HTTP call does not freeze the event
+            # loop and calls run concurrently) with concurrency-capping and 429 self-throttling.
+            response = await self._graph_get(client, endpoint)
             if response.status_code == 200:
                 return response.json()
             # If response is 404 then it means there is no resource associated with the provided id
@@ -45,9 +80,7 @@ class AADFacade:
         values = []
         try:
             while endpoint:
-                # Run the blocking (synchronous, requests-based) call in the executor. Bind
-                # `endpoint` via a default arg so each iteration's lambda captures its own value.
-                response = await run_concurrently(lambda ep=endpoint: client.get(ep))
+                response = await self._graph_get(client, endpoint)
                 if response.status_code == 200:
                     response_json = response.json()
                     values.extend(response_json.get('value', []))
