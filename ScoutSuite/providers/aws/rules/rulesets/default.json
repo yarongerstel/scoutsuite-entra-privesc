@@ -1397,6 +1397,12 @@
         "vpc-subnet-without-flow-log.json": [
             {
                 "enabled": true,
+                "level": "danger"
+            }
+        ],
+        "vpc-subnet-flow-log-only-at-vpc-level.json": [
+            {
+                "enabled": true,
                 "level": "warning"
             }
         ]

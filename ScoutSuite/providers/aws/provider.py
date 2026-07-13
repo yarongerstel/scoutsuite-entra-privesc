@@ -636,16 +636,21 @@ class AWSProvider(BaseProvider):
     def _set_subnet_effective_flow_logs(self):
         """
         A VPC Flow Log can be created at the VPC, subnet, or ENI level; a VPC-level flow log
-        captures traffic for every subnet in that VPC. The 'subnet without a flow log' finding
-        must therefore not flag a subnet whose parent VPC already has a flow log. This computes,
-        for each subnet, an explicit `no_flow_log_considering_vpc` flag that is True only when
-        NEITHER the subnet itself NOR its parent VPC has a flow log.
+        captures traffic for every subnet in that VPC. This computes, for each subnet, two
+        explicit flags so the 'subnet without a flow log' concern can be reported at two
+        severities instead of a single false-positive-prone check:
 
-        The flag is derived directly from the region-level flow logs collection (the source of
-        truth, keyed by flow log with a `resource_id` of the vpc-/subnet- it is attached to), so
-        it is correct regardless of whether the fetch-time propagation of VPC flow logs onto
-        subnets ran (e.g. on `--local` re-analysis). Existing per-object `flow_logs` fields are
-        also honoured as a fallback.
+          - `no_flow_log_considering_vpc` (real gap): True only when NEITHER the subnet itself
+            NOR its parent VPC has a flow log - i.e. the subnet's traffic is genuinely not logged.
+          - `flow_log_only_at_vpc_level` (informational/low): True when the subnet has no flow
+            log of its own but is covered by a VPC-level flow log. Traffic is logged, but there
+            is no dedicated per-subnet flow log (relevant if you want per-subnet configuration
+            or retention).
+
+        Whether a subnet/VPC has its *own* flow log is derived from the region-level flow logs
+        collection (the source of truth: each flow log carries a `resource_id` of the vpc-/subnet-
+        /eni- it is attached to), so the result is correct regardless of whether the fetch-time
+        propagation of VPC flow logs onto subnets ran (e.g. on `--local` re-analysis).
         """
         vpc_config = self.services.get('vpc', {})
         for region_id, region in vpc_config.get('regions', {}).items():
@@ -655,12 +660,16 @@ class AWSProvider(BaseProvider):
                 if flow_log.get('resource_id')
             }
             for vpc_id, vpc in region.get('vpcs', {}).items():
-                vpc_has_flow_log = bool(vpc.get('flow_logs')) or vpc_id in flow_log_resource_ids
+                vpc_has_own_flow_log = vpc_id in flow_log_resource_ids or bool(vpc.get('flow_logs'))
                 for subnet_id, subnet in vpc.get('subnets', {}).items():
-                    subnet_has_own_flow_log = \
-                        bool(subnet.get('flow_logs')) or subnet_id in flow_log_resource_ids
+                    # 'own' must come from the region-level source of truth, since a subnet's
+                    # own `flow_logs` field may already include VPC-level logs propagated at
+                    # fetch time - which would mask the VPC-only case.
+                    subnet_has_own_flow_log = subnet_id in flow_log_resource_ids
                     subnet['no_flow_log_considering_vpc'] = \
-                        not (subnet_has_own_flow_log or vpc_has_flow_log)
+                        not (subnet_has_own_flow_log or vpc_has_own_flow_log)
+                    subnet['flow_log_only_at_vpc_level'] = \
+                        (not subnet_has_own_flow_log) and vpc_has_own_flow_log
 
     def _set_emr_vpc_ids(self):
         clear_list = []

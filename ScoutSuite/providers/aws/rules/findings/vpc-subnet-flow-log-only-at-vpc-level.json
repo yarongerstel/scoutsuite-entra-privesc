@@ -1,0 +1,19 @@
+{
+    "description": "Subnet Without Its Own Flow Log (Covered Only at VPC Level)",
+    "rationale": "This subnet has no flow log of its own, but its parent VPC has a VPC-level flow log, which already captures traffic for every subnet in the VPC. Network traffic for this subnet is therefore being logged, so this is not a gap in coverage - it is surfaced only at low/informational severity. You may still want a dedicated subnet-level flow log if you need per-subnet configuration, such as a different log destination, aggregation interval, or retention for this subnet.",
+    "remediation": "No action is required for coverage. If you need per-subnet control over flow log configuration or retention, create a subnet-level flow log for this subnet in addition to the VPC-level one.",
+    "references": [
+        "https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs.html"
+    ],
+    "dashboard_name": "Subnets",
+    "path": "vpc.regions.id.vpcs.id.subnets.id",
+    "conditions": [
+        "and",
+        [
+            "vpc.regions.id.vpcs.id.subnets.id.flow_log_only_at_vpc_level",
+            "true",
+            ""
+        ]
+    ],
+    "id_suffix": "flow_log_only_at_vpc_level"
+}
