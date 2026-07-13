@@ -1,0 +1,21 @@
+{
+    "description": "Service Principal Holds a Dangerous Combination of Microsoft Graph Permissions",
+    "rationale": "Some Microsoft Graph Application permissions are not individually maximal but, when held together by a single application/service principal, enable privilege escalation to full directory control. For example, <samp>Application.ReadWrite.All</samp> together with <samp>AppRoleAssignment.ReadWrite.All</samp> lets the app create/modify any application AND grant app role assignments to any principal - so it can grant itself (or a new app it controls) arbitrary permissions, escalating to effectively unlimited control of the tenant. Anyone who can act as this service principal (via its credentials, its owners, or a federated credential) inherits that escalation path.",
+    "remediation": "Apply least privilege to the flagged service principal's Microsoft Graph Application permissions: remove permissions that are not strictly required, and in particular avoid granting application-management permissions (<samp>Application.ReadWrite.All</samp>, <samp>AppRoleAssignment.ReadWrite.All</samp>) alongside directory-write or role-management permissions on the same identity. Tightly control the credentials and owners of any app that legitimately needs such permissions.",
+    "references": [
+        "https://learn.microsoft.com/en-us/graph/permissions-reference",
+        "https://posts.specterops.io/azure-privilege-escalation-via-azure-api-permissions-abuse-74aee1006f48",
+        "https://learn.microsoft.com/en-us/entra/identity-platform/security-best-practices-for-app-registration"
+    ],
+    "dashboard_name": "Enterprise Applications",
+    "path": "aad.service_principals.id",
+    "conditions": [
+        "and",
+        [
+            "aad.service_principals.id.has_dangerous_permission_combination",
+            "true",
+            ""
+        ]
+    ],
+    "id_suffix": "has_dangerous_permission_combination"
+}

@@ -1,0 +1,21 @@
+{
+    "description": "Guest User Holds a Strong Directory or Subscription Role",
+    "rationale": "Guest users are external accounts invited into the tenant (identified by userType 'Guest'), typically for limited collaboration. A guest that holds a strong Entra directory role (e.g. User Administrator, Groups Administrator, Application Administrator or higher) or a strong Azure RBAC role (Owner, Contributor, User Access Administrator) at subscription scope has privilege far beyond normal guest collaboration. Because the underlying account is controlled by an external organization, this widens the tenant's trust boundary and creates a privilege-escalation and lateral-movement path if the external account is compromised.",
+    "remediation": "Review each flagged guest and confirm the assigned role is intentional and necessary. Prefer assigning privileged roles to internal member accounts, use Privileged Identity Management for just-in-time and time-bound elevation, and remove standing strong roles from guest accounts. Consider access reviews for guests holding administrative roles.",
+    "references": [
+        "https://learn.microsoft.com/en-us/entra/identity/users/users-restrict-guest-permissions",
+        "https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/best-practices",
+        "https://learn.microsoft.com/en-us/azure/role-based-access-control/best-practices"
+    ],
+    "dashboard_name": "Users",
+    "path": "aad.users.id",
+    "conditions": [
+        "and",
+        [
+            "aad.users.id.guest_holds_strong_role",
+            "true",
+            ""
+        ]
+    ],
+    "id_suffix": "guest_holds_strong_role"
+}

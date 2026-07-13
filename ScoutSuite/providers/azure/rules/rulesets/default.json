@@ -25,6 +25,42 @@
                 "level": "warning"
             }
         ],
+        "aad-service-principal-owner-weaker-than-permissions.json": [
+            {
+                "enabled": true,
+                "level": "danger"
+            }
+        ],
+        "aad-service-principal-dangerous-permission-combination.json": [
+            {
+                "enabled": true,
+                "level": "danger"
+            }
+        ],
+        "aad-app-federated-credential-broad.json": [
+            {
+                "enabled": true,
+                "level": "danger"
+            }
+        ],
+        "aad-guest-user-strong-role.json": [
+            {
+                "enabled": true,
+                "level": "danger"
+            }
+        ],
+        "aad-user-strong-subscription-but-weak-directory.json": [
+            {
+                "enabled": true,
+                "level": "danger"
+            }
+        ],
+        "aad-managed-identity-strong-subscription-role.json": [
+            {
+                "enabled": true,
+                "level": "warning"
+            }
+        ],
         "appservice-authentication-disabled.json": [
             {
                 "enabled": true,

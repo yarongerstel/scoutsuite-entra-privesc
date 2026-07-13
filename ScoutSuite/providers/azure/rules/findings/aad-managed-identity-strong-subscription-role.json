@@ -1,0 +1,21 @@
+{
+    "description": "Managed Identity Holds a Strong Role on a Subscription",
+    "rationale": "A Managed Identity is a service principal whose credentials are managed by Azure and handed to a compute resource (VM, Function App, Logic App, Container App, etc.). When a Managed Identity holds a strong Azure RBAC role (Owner, Contributor, User Access Administrator, or a custom role with broad/wildcard actions) at subscription scope, anyone who can control the compute resource's control plane - or run code on it - can obtain a token for that Managed Identity (e.g. via the instance metadata endpoint) and act with its subscription-level power. This turns control over a single VM/function into control over the whole subscription, a common cloud lateral-movement and privilege-escalation path.",
+    "remediation": "Apply least privilege to Managed Identities: replace broad built-in roles (Owner/Contributor/User Access Administrator) with narrower built-in or custom roles scoped to only the resources and actions the workload needs, ideally at resource-group or resource scope rather than subscription scope. Restrict who can deploy code to, or manage, the compute resources that carry powerful Managed Identities, and monitor their token usage.",
+    "references": [
+        "https://learn.microsoft.com/en-us/entra/identity/managed-identities-azure-resources/overview",
+        "https://learn.microsoft.com/en-us/azure/role-based-access-control/best-practices",
+        "https://learn.microsoft.com/en-us/security/benchmark/azure/mcsb-privileged-access"
+    ],
+    "dashboard_name": "Enterprise Applications With Strong Subscription Roles",
+    "path": "aad.enterprise_apps_with_strong_subscription_roles.id",
+    "conditions": [
+        "and",
+        [
+            "aad.enterprise_apps_with_strong_subscription_roles.id.service_principal_type",
+            "equal",
+            "ManagedIdentity"
+        ]
+    ],
+    "id_suffix": "managed_identity_strong_subscription_role"
+}

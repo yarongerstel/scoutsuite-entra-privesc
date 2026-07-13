@@ -1,0 +1,25 @@
+{
+  "_comment": "Sets of Microsoft Graph Application permissions that, held together by a single application/service principal, enable privilege escalation even if each is not individually maximal. A combination matches when ALL of its permissions are present in the app's granted permissions. Curated heuristic based on documented Entra ID escalation paths (SpecterOps and others).",
+  "dangerous_combinations": [
+    {
+      "name": "Self-service God Mode (manage apps + grant app roles)",
+      "permissions": ["Application.ReadWrite.All", "AppRoleAssignment.ReadWrite.All"],
+      "rationale": "The app can create/modify any application AND grant app role assignments to any principal - so it can grant itself (or a new app it controls) arbitrary Microsoft Graph permissions, escalating to effectively unlimited directory control."
+    },
+    {
+      "name": "Manage apps + manage directory roles",
+      "permissions": ["Application.ReadWrite.All", "RoleManagement.ReadWrite.Directory"],
+      "rationale": "The app can both control application objects (add credentials, act as any app) and assign Entra directory roles (e.g. Global Administrator), giving multiple independent paths to full tenant takeover."
+    },
+    {
+      "name": "Grant app roles + manage directory roles",
+      "permissions": ["AppRoleAssignment.ReadWrite.All", "RoleManagement.ReadWrite.Directory"],
+      "rationale": "The app can grant arbitrary app role assignments and assign privileged directory roles, allowing it to escalate any principal (including itself) to full control."
+    },
+    {
+      "name": "Full directory write + grant app roles",
+      "permissions": ["Directory.ReadWrite.All", "AppRoleAssignment.ReadWrite.All"],
+      "rationale": "Broad directory write combined with the ability to grant app role assignments enables creating/controlling principals and granting them powerful permissions."
+    }
+  ]
+}

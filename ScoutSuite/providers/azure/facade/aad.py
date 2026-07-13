@@ -145,6 +145,20 @@ class AADFacade:
             print_exception(f'Failed to retrieve owners for application {application_id}: {e}')
             return []
 
+    async def get_application_federated_identity_credentials(self, application_id):
+        """
+        Federated identity credentials (Workload Identity Federation) configured on the
+        application - each trusts an external OIDC issuer + subject to authenticate AS the
+        app without a client secret/certificate.
+        """
+        try:
+            return await self._get_microsoft_graph_response_paginated(
+                f'applications/{application_id}/federatedIdentityCredentials')
+        except Exception as e:
+            print_exception(
+                f'Failed to retrieve federated identity credentials for application {application_id}: {e}')
+            return []
+
     async def get_service_principal_owners(self, service_principal_id):
         try:
             return await self._get_microsoft_graph_response_paginated(

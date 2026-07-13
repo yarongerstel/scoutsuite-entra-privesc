@@ -1,38 +1,39 @@
 """
-Cross-resource correlation for two Entra ID (Azure AD) privilege-escalation checks that
-cannot be expressed as a single-resource JMESPath rule:
+Cross-resource correlation for the Entra ID (Azure AD) privilege-escalation checks that
+cannot be expressed as a single-resource JMESPath rule. Each function below writes derived
+fields/flags back onto the relevant resource dicts (following the same pattern as
+AzureProvider._match_rbac_roles_and_principals) so that simple declarative JSON findings can
+flag them.
 
-1. App Registration (Application) owner privilege check: flags an Application when the
-   Application Permissions (API permissions) granted to its corresponding Service Principal
-   outrank the highest Entra directory role held by any of the Application's owners. An
-   owner can add credentials/secrets to the app and act as it, so an owner who is weaker
-   than their own app's permissions can use the app to escalate their own privilege.
-
-2. Enterprise Application (Service Principal) subscription privilege table: for each
-   Service Principal holding a 'strong' Azure RBAC role at subscription scope, records
-   which role(s)/subscription(s) it holds and who owns/created it.
-
-Both derived results are written back onto the relevant resource dicts (following the same
-pattern as AzureProvider._match_rbac_roles_and_principals) so that simple declarative JSON
-rules can flag them.
+Checks implemented here:
+ 1. App Registration owner weaker than the app's granted permissions
+    (compute_app_owner_privilege_escalation)
+ 2. Enterprise Application (Service Principal) strong subscription-role table, incl. Managed
+    Identities (compute_enterprise_app_subscription_privilege_table)
+ 3. Service Principal owner weaker than the SP's granted permissions
+    (compute_sp_owner_privilege_escalation)
+ 4. Dangerous Microsoft Graph permission combinations held by one app/SP
+    (compute_dangerous_permission_combinations)
+ 5. Overly-broad federated identity credentials (Workload Identity Federation)
+    (compute_broad_federated_credentials)
+ 6. Guest users holding strong directory or subscription roles
+    (compute_guest_strong_roles)
+ 7. Users who hold a strong subscription role while being weak in the directory
+    (compute_users_strong_subscription_but_weak_directory)
 
 IMPORTANT / LIMITATIONS (see docs/entra-privesc-checks.md for the full write-up):
- - The permission and directory-role risk tiers below are a curated, opinionated heuristic,
-   not an authoritative Microsoft ranking. They are meant to catch the common/well-documented
-   privilege-escalation-enabling permissions, not to be an exhaustive classification of all
-   Microsoft Graph permissions or all built-in directory roles.
+ - The permission and directory-role risk tiers are a curated, opinionated heuristic, not an
+   authoritative Microsoft ranking. They catch common/well-documented escalation-enabling
+   permissions and roles, not an exhaustive classification.
  - Directory roles are matched by their English displayName as returned by Microsoft Graph;
-   tenants using a different Graph-reported display language will not match and fall back to
-   the lowest tier.
- - Microsoft Graph API permissions are matched by GUID (appRoleId) against a curated table of
-   well-known Microsoft Graph Application permission GUIDs. An appRoleAssignment granted from
-   a resource other than Microsoft Graph, or a Microsoft Graph permission not present in the
-   curated table, cannot be tiered and is treated as tier 0 (NOT flagged) rather than guessed -
-   this can under-report risk for permissions we haven't curated, it will never over-report.
+   tenants reporting role names in another display language fall back to the lowest tier.
+ - Microsoft Graph API permissions are matched by GUID (appRoleId) against a curated table.
+   A permission not in the table is treated as tier 0 / unknown (NOT flagged) rather than
+   guessed - this can under-report, it will never over-report.
  - "Who created" an Enterprise Application is approximated via its owners, because Microsoft
-   Graph's `applications`/`servicePrincipals` APIs do not expose a `createdBy` field; the true
-   creator would require Entra ID Audit Log access (`AuditLog.Read.All` + log retention), which
-   this check does not attempt.
+   Graph does not expose a `createdBy` field on applications/servicePrincipals.
+ - Federated-credential breadth is a heuristic keyed on known CI issuers; a specific subject
+   on an unknown issuer is not flagged (conservative under-report).
 """
 
 import json
@@ -44,6 +45,17 @@ _DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'en
 
 MICROSOFT_GRAPH_APP_ID = '00000003-0000-0000-c000-000000000000'
 
+# A guest holding a directory role at or above this tier (2 = write-capable/admin roles such
+# as User Administrator, Groups Administrator, Directory Writers) is considered to hold a
+# 'strong' role worth flagging. Tuneable; documented as heuristic.
+STRONG_GUEST_DIRECTORY_ROLE_TIER = 2
+
+# A user whose highest directory role is at or below this tier (1 = read-only roles such as
+# Directory Readers / Global Reader, 0 = no directory role) is considered a 'weak' identity in
+# the directory. Used to flag users who are weak in the directory yet hold a strong Azure RBAC
+# role on a subscription. Tuneable; documented as heuristic.
+WEAK_USER_DIRECTORY_ROLE_TIER = 1
+
 
 def _load_json(filename):
     path = os.path.join(_DATA_DIR, filename)
@@ -54,6 +66,8 @@ def _load_json(filename):
 _directory_role_tiers_data = _load_json('directory_role_privilege_tiers.json')
 _graph_permission_tiers_data = _load_json('graph_application_permission_risk_tiers.json')
 _subscription_role_strength_data = _load_json('subscription_role_strength.json')
+_dangerous_combinations_data = _load_json('dangerous_permission_combinations.json')
+_federated_credential_patterns_data = _load_json('broad_federated_credential_patterns.json')
 
 # name (lowercased) -> tier (int)
 _DIRECTORY_ROLE_NAME_TO_TIER = {
@@ -76,6 +90,20 @@ _STRONG_ACTION_PATTERNS = [
     pattern.lower() for pattern in _subscription_role_strength_data['strong_action_patterns']
 ]
 
+# List of {name, permissions (set of lowercased names), rationale}
+_DANGEROUS_COMBINATIONS = [
+    {
+        'name': combo['name'],
+        'permissions': {p.lower() for p in combo['permissions']},
+        'rationale': combo.get('rationale', ''),
+    }
+    for combo in _dangerous_combinations_data['dangerous_combinations']
+]
+
+_FIC_WILDCARD_INDICATORS = _federated_credential_patterns_data['wildcard_subject_indicators']
+_FIC_FLEXIBLE_IS_BROAD = _federated_credential_patterns_data.get('flexible_matching_is_broad', True)
+_FIC_KNOWN_CI_ISSUERS = _federated_credential_patterns_data['known_ci_issuers']
+
 
 def get_directory_role_tier(role_display_name):
     if not role_display_name:
@@ -91,10 +119,10 @@ def get_graph_permission_info(app_role_id):
 
 def is_subscription_role_strong(role_dict):
     """
-    A subscription-scope RBAC role is considered 'strong' if it's one of the well-known
-    high-privilege built-ins (Owner/Contributor/User Access Administrator), it was already
-    flagged by ScoutSuite as a wildcard custom role (`custom_subscription_owner_role`), or
-    any of its actions match a known broad/privilege-escalation-enabling pattern.
+    A subscription-scope RBAC role is 'strong' if it's a well-known high-privilege built-in
+    (Owner/Contributor/User Access Administrator), ScoutSuite already flagged it as a wildcard
+    custom role (`custom_subscription_owner_role`), or any of its actions match a known
+    broad/privilege-escalation-enabling pattern.
     """
     name = (role_dict.get('name') or '').lower()
     if name in _STRONG_BUILT_IN_ROLE_NAMES:
@@ -109,6 +137,23 @@ def is_subscription_role_strong(role_dict):
     return False
 
 
+def _granted_graph_permissions(granted_app_role_assignments):
+    """
+    Returns (max_tier, sorted list of tiered permission names) for the Microsoft Graph
+    Application permissions actually granted to a service principal.
+    """
+    max_tier = 0
+    names = []
+    for assignment in granted_app_role_assignments or []:
+        if assignment.get('resource_display_name') != 'Microsoft Graph':
+            continue
+        info = get_graph_permission_info(assignment.get('app_role_id'))
+        if info:
+            names.append(info['name'])
+            max_tier = max(max_tier, info['tier'])
+    return max_tier, sorted(set(names))
+
+
 def _principal_directory_role_tier(principal_id, directory_roles):
     """Highest directory-role privilege tier held by a given principal (user or SP) id."""
     best_tier = _DIRECTORY_ROLE_DEFAULT_TIER
@@ -121,55 +166,47 @@ def _principal_directory_role_tier(principal_id, directory_roles):
     return best_tier, held_roles
 
 
+def _max_owner_directory_role(owners, directory_roles):
+    """Returns (max_tier, per-owner detail list) across an object's owners."""
+    max_tier = _DIRECTORY_ROLE_DEFAULT_TIER
+    owners_detail = []
+    for owner in owners or []:
+        owner_tier, owner_roles = _principal_directory_role_tier(owner.get('id'), directory_roles)
+        owners_detail.append({
+            'id': owner.get('id'),
+            'display_name': owner.get('display_name') or owner.get('user_principal_name'),
+            'directory_roles': owner_roles,
+            'directory_role_tier': owner_tier,
+        })
+        max_tier = max(max_tier, owner_tier)
+    return max_tier, owners_detail
+
+
 def compute_app_owner_privilege_escalation(applications, service_principals, directory_roles):
     """
-    For each non-enterprise Application (App Registration), compares the highest Microsoft
-    Graph Application-permission risk tier granted to its corresponding Service Principal
-    against the highest Entra directory-role privilege tier held by any of its owners.
-    Mutates each application dict in place with:
-      - 'granted_permissions_risk_tier' (int) and 'granted_permissions' (list of names)
-      - 'max_owner_directory_role_tier' (int) and 'owners_directory_roles' (per-owner detail)
-      - 'owner_weaker_than_app_permissions' (bool)
+    For each App Registration, compares the highest Microsoft Graph Application-permission risk
+    tier granted to its corresponding Service Principal against the highest Entra directory-role
+    privilege tier held by any of its owners. Mutates each application dict with
+    granted_permissions[_risk_tier], max_owner_directory_role_tier, owners_directory_roles and
+    owner_weaker_than_app_permissions (bool).
     """
     try:
         service_principal_by_app_id = {
             sp.get('app_id'): sp for sp in service_principals.values() if sp.get('app_id')
         }
-
         for application in applications.values():
             matching_sp = service_principal_by_app_id.get(application.get('app_id'))
-
-            granted_tier = 0
-            granted_permission_names = []
-            if matching_sp:
-                for assignment in matching_sp.get('granted_app_role_assignments', []):
-                    if assignment.get('resource_display_name') != 'Microsoft Graph':
-                        continue
-                    info = get_graph_permission_info(assignment.get('app_role_id'))
-                    if info:
-                        granted_permission_names.append(info['name'])
-                        granted_tier = max(granted_tier, info['tier'])
+            granted_tier, granted_names = _granted_graph_permissions(
+                matching_sp.get('granted_app_role_assignments') if matching_sp else [])
 
             application['granted_permissions_risk_tier'] = granted_tier
-            application['granted_permissions'] = sorted(set(granted_permission_names))
+            application['granted_permissions'] = granted_names
 
-            max_owner_tier = _DIRECTORY_ROLE_DEFAULT_TIER
-            owners_directory_roles = []
-            for owner in application.get('owners', []):
-                owner_tier, owner_roles = _principal_directory_role_tier(owner.get('id'), directory_roles)
-                owners_directory_roles.append({
-                    'id': owner.get('id'),
-                    'display_name': owner.get('display_name') or owner.get('user_principal_name'),
-                    'directory_roles': owner_roles,
-                    'directory_role_tier': owner_tier,
-                })
-                max_owner_tier = max(max_owner_tier, owner_tier)
-
+            max_owner_tier, owners_detail = _max_owner_directory_role(
+                application.get('owners'), directory_roles)
             application['max_owner_directory_role_tier'] = max_owner_tier
-            application['owners_directory_roles'] = owners_directory_roles
+            application['owners_directory_roles'] = owners_detail
 
-            # Only meaningful when the app actually has owners and was granted at least one
-            # tiered permission; an app with no owners can't be escalated-through via an owner.
             application['owner_weaker_than_app_permissions'] = bool(
                 application.get('owners') and granted_tier > 0 and max_owner_tier < granted_tier
             )
@@ -177,15 +214,181 @@ def compute_app_owner_privilege_escalation(applications, service_principals, dir
         print_exception(f'Unable to compute app owner privilege escalation: {e}')
 
 
+def compute_sp_owner_privilege_escalation(service_principals, directory_roles):
+    """
+    Same idea as compute_app_owner_privilege_escalation but for Service Principals that have
+    their own owners and their own granted permissions. Mutates each SP dict with
+    granted_permissions[_risk_tier], max_owner_directory_role_tier, owners_directory_roles and
+    owner_weaker_than_app_permissions (bool).
+    """
+    try:
+        for sp in service_principals.values():
+            granted_tier, granted_names = _granted_graph_permissions(
+                sp.get('granted_app_role_assignments'))
+            sp['granted_permissions_risk_tier'] = granted_tier
+            sp['granted_permissions'] = granted_names
+
+            max_owner_tier, owners_detail = _max_owner_directory_role(
+                sp.get('owners'), directory_roles)
+            sp['max_owner_directory_role_tier'] = max_owner_tier
+            sp['owners_directory_roles'] = owners_detail
+
+            sp['owner_weaker_than_app_permissions'] = bool(
+                sp.get('owners') and granted_tier > 0 and max_owner_tier < granted_tier
+            )
+    except Exception as e:
+        print_exception(f'Unable to compute service principal owner privilege escalation: {e}')
+
+
+def _matched_dangerous_combinations(granted_permission_names):
+    granted_lower = {n.lower() for n in granted_permission_names or []}
+    matched = []
+    for combo in _DANGEROUS_COMBINATIONS:
+        if combo['permissions'].issubset(granted_lower):
+            matched.append({'name': combo['name'], 'rationale': combo['rationale']})
+    return matched
+
+
+def compute_dangerous_permission_combinations(applications, service_principals):
+    """
+    Flags any App Registration or Service Principal whose granted Microsoft Graph permissions
+    contain a full dangerous combination (see dangerous_permission_combinations.json). Relies on
+    granted_permissions already computed by the owner-privesc functions, so must run after them.
+    Mutates each dict with dangerous_permission_combinations (list) and
+    has_dangerous_permission_combination (bool).
+    """
+    try:
+        for collection in (applications, service_principals):
+            for obj in collection.values():
+                matched = _matched_dangerous_combinations(obj.get('granted_permissions'))
+                obj['dangerous_permission_combinations'] = matched
+                obj['has_dangerous_permission_combination'] = bool(matched)
+    except Exception as e:
+        print_exception(f'Unable to compute dangerous permission combinations: {e}')
+
+
+def is_federated_credential_broad(fic):
+    """
+    Heuristic: a federated identity credential is 'broad' if its subject uses a wildcard, it
+    uses flexible claims matching, or (for a known CI issuer) it either contains an
+    always-broad substring or is not pinned to a specific branch/tag/environment.
+    """
+    subject = fic.get('subject') or ''
+    for indicator in _FIC_WILDCARD_INDICATORS:
+        if indicator in subject:
+            return True
+    if _FIC_FLEXIBLE_IS_BROAD and fic.get('claims_matching_expression'):
+        return True
+    issuer = fic.get('issuer') or ''
+    for issuer_key, cfg in _FIC_KNOWN_CI_ISSUERS.items():
+        if issuer_key in issuer:
+            for broad_sub in cfg.get('always_broad_substrings', []):
+                if broad_sub in subject:
+                    return True
+            safe_pins = cfg.get('safe_pin_substrings', [])
+            if safe_pins and not any(pin in subject for pin in safe_pins):
+                return True
+            return False
+    return False
+
+
+def compute_broad_federated_credentials(applications):
+    """
+    Flags any App Registration that has an overly-broad federated identity credential. Mutates
+    each application dict with broad_federated_credentials (list) and
+    has_broad_federated_credential (bool).
+    """
+    try:
+        for application in applications.values():
+            broad = [
+                {'name': fic.get('name'), 'issuer': fic.get('issuer'), 'subject': fic.get('subject')}
+                for fic in application.get('federated_identity_credentials', [])
+                if is_federated_credential_broad(fic)
+            ]
+            application['broad_federated_credentials'] = broad
+            application['has_broad_federated_credential'] = bool(broad)
+    except Exception as e:
+        print_exception(f'Unable to compute broad federated credentials: {e}')
+
+
+def _user_strong_subscription_roles(user, rbac_subscriptions):
+    """List of {subscription_id, role_name} of strong subscription RBAC roles held by a user."""
+    strong_sub_roles = []
+    for assignment in user.get('roles') or []:
+        subscription_id = assignment.get('subscription_id')
+        role_id = assignment.get('role_id')
+        subscription = rbac_subscriptions.get(subscription_id, {}) if rbac_subscriptions else {}
+        role = subscription.get('roles', {}).get(role_id)
+        if role and is_subscription_role_strong(role):
+            strong_sub_roles.append({
+                'subscription_id': subscription_id,
+                'role_name': role.get('name'),
+            })
+    return strong_sub_roles
+
+
+def compute_guest_strong_roles(users, directory_roles, rbac_subscriptions):
+    """
+    Flags any guest user (userType == 'Guest') that holds a strong Entra directory role (tier
+    >= STRONG_GUEST_DIRECTORY_ROLE_TIER) or a strong Azure RBAC role at subscription scope.
+    Mutates each guest user dict with held_directory_roles, held_strong_subscription_roles and
+    guest_holds_strong_role (bool).
+    """
+    try:
+        for user in users.values():
+            if user.get('user_type') != 'Guest':
+                continue
+
+            dir_tier, held_roles = _principal_directory_role_tier(user.get('id'), directory_roles)
+            user['held_directory_roles'] = held_roles
+
+            strong_sub_roles = _user_strong_subscription_roles(user, rbac_subscriptions)
+            user['held_strong_subscription_roles'] = strong_sub_roles
+
+            user['guest_holds_strong_role'] = bool(
+                dir_tier >= STRONG_GUEST_DIRECTORY_ROLE_TIER or strong_sub_roles
+            )
+    except Exception as e:
+        print_exception(f'Unable to compute guest strong roles: {e}')
+
+
+def compute_users_strong_subscription_but_weak_directory(users, directory_roles, rbac_subscriptions):
+    """
+    Flags any user who holds a strong Azure RBAC role at subscription scope while being a weak
+    identity in the directory itself - i.e. their highest Entra directory role is at or below
+    WEAK_USER_DIRECTORY_ROLE_TIER (no admin role). Such users are powerful on the Azure control
+    plane despite being low-privileged in the directory, which concentrates blast radius on
+    ordinary accounts. Mutates each user dict with held_strong_subscription_roles,
+    directory_role_tier and strong_subscription_role_but_weak_directory (bool).
+    """
+    try:
+        for user in users.values():
+            strong_sub_roles = _user_strong_subscription_roles(user, rbac_subscriptions)
+            # Preserve any value already set by the guest check (identical computation).
+            user['held_strong_subscription_roles'] = strong_sub_roles
+
+            dir_tier, held_roles = _principal_directory_role_tier(user.get('id'), directory_roles)
+            user.setdefault('held_directory_roles', held_roles)
+            user['directory_role_tier'] = dir_tier
+
+            user['strong_subscription_role_but_weak_directory'] = bool(
+                strong_sub_roles and dir_tier <= WEAK_USER_DIRECTORY_ROLE_TIER
+            )
+    except Exception as e:
+        print_exception(f'Unable to compute users with strong subscription but weak directory role: {e}')
+
+
 def compute_enterprise_app_subscription_privilege_table(service_principals, rbac_subscriptions):
     """
     Builds (and returns) a table, keyed by a synthetic row id (matching the dict-of-dicts
     convention used throughout ScoutSuite so it can be browsed/ruled-on like any other
-    resource), of Enterprise Applications (Service Principals) that hold a 'strong' Azure
-    RBAC role directly at subscription scope. Also mutates each such service principal dict
-    with 'strong_subscription_roles' (list) + 'has_strong_subscription_role' (bool).
-    Each row: service_principal_id, name, app_id, subscription_id, role_name,
-    owners (creator approximation).
+    resource), of Enterprise Applications (Service Principals) that hold a 'strong' Azure RBAC
+    role directly at subscription scope. Also mutates each such service principal dict with
+    strong_subscription_roles (list) + has_strong_subscription_role (bool). Managed Identities
+    are included and distinguished via the service_principal_type column, since a Managed
+    Identity with a strong subscription role is a distinct control-plane escalation vector.
+    Each row: service_principal_id, name, app_id, service_principal_type, subscription_id,
+    role_name, owners (creator approximation).
     """
     table = {}
     try:
@@ -218,6 +421,7 @@ def compute_enterprise_app_subscription_privilege_table(service_principals, rbac
                     'service_principal_id': service_principal.get('id'),
                     'name': service_principal.get('app_name') or service_principal.get('name'),
                     'app_id': service_principal.get('app_id'),
+                    'service_principal_type': service_principal.get('service_principal_type'),
                     'subscription_id': subscription_id,
                     'role_name': role.get('name'),
                     'owners': [

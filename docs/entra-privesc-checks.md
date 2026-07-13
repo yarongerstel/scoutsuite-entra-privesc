@@ -1,12 +1,30 @@
 # Entra ID (Azure AD) privilege-escalation checks
 
 This fork of [ScoutSuite](https://github.com/nccgroup/ScoutSuite) (based on release `5.14.0`)
-adds two Azure/Entra ID checks that ScoutSuite's upstream Azure provider does not have:
+adds Azure/Entra ID privilege-escalation checks that ScoutSuite's upstream Azure provider does
+not have. All of them are ordinary ScoutSuite findings: they appear in the HTML report exactly
+like the built-in checks (Danger/Warning severity, expandable rationale/remediation/references)
+and are toggled in `rules/rulesets/default.json`.
 
 1. **App Registration owner weaker than the app's granted permissions**
    (`aad-app-registration-owner-weaker-than-permissions`)
 2. **Enterprise Application (Service Principal) with a strong role on a subscription**
    (`aad-enterprise-app-strong-subscription-role`), reported as a browsable table.
+3. **Service Principal owner weaker than the SP's granted permissions**
+   (`aad-service-principal-owner-weaker-than-permissions`)
+4. **Service Principal holds a dangerous combination of Graph permissions**
+   (`aad-service-principal-dangerous-permission-combination`)
+5. **App Registration has an overly broad federated identity credential**
+   (`aad-app-federated-credential-broad`)
+6. **Guest user holds a strong directory or subscription role**
+   (`aad-guest-user-strong-role`)
+7. **User holds a strong subscription role despite being a weak directory identity**
+   (`aad-user-strong-subscription-but-weak-directory`)
+8. **Managed Identity holds a strong role on a subscription**
+   (`aad-managed-identity-strong-subscription-role`)
+
+Checks 1-2 are described in detail below; checks 3-8 are summarized in
+[Additional checks](#additional-checks).
 
 ## 1. App Registration owner vs. granted permissions
 
@@ -86,6 +104,58 @@ Log** access (`AuditLog.Read.All` permission, plus sufficient log retention, i.e
 its `initiatedBy`) - which is out of scope for this fork today, since audit log retention varies
 by license and by tenant configuration and cannot be assumed to be reliably available or complete.
 
+## Additional checks
+
+All of the checks below reuse the same fetched data plus the curated risk-tier tables in
+`ScoutSuite/providers/azure/data/entra_privesc/`. The correlation logic lives in
+`ScoutSuite/providers/azure/entra_privesc.py` and runs in `AzureProvider.preprocessing()`.
+
+### 3. Service Principal owner vs. granted permissions
+The mirror of check 1, but for Service Principals (Enterprise Applications), which can have
+their own owners distinct from the App Registration's. Flags an SP whose granted Microsoft
+Graph Application permissions outrank the highest directory role held by any of its owners -
+an owner can add credentials to the SP and act as it.
+
+### 4. Dangerous permission combinations
+Flags an app/SP whose granted Microsoft Graph permissions contain a full **combination** that
+enables escalation even when each permission is not individually maximal - e.g.
+`Application.ReadWrite.All` + `AppRoleAssignment.ReadWrite.All` (create/modify apps *and* grant
+app roles = self-grant arbitrary permissions). The combinations are curated in
+`dangerous_permission_combinations.json`; a combination matches only when **all** of its
+permissions are present.
+
+### 5. Overly broad federated identity credentials (Workload Identity Federation)
+Fetches each application's federated identity credentials
+(`GET /applications/{id}/federatedIdentityCredentials`) and flags any whose trusted subject is
+overly broad - a wildcard, a GitHub Actions `pull_request` subject (exercisable by any PR,
+including from forks), a subject not pinned to a specific branch/tag/environment, or a flexible
+claims-matching expression. Anyone who can run in that external context can authenticate **as
+the app** with no secret, inheriting its permissions. Issuer/subject heuristics are curated in
+`broad_federated_credential_patterns.json`; a specific subject on an **unknown** issuer is not
+flagged (conservative under-report).
+
+### 6. Guest users holding strong roles
+Flags a guest user (`userType == 'Guest'`) that holds a strong Entra directory role (tier >=
+`STRONG_GUEST_DIRECTORY_ROLE_TIER`, default 2 = write-capable/admin) or a strong Azure RBAC role
+at subscription scope. External accounts with standing admin power widen the tenant trust
+boundary.
+
+### 7. Users strong on a subscription but weak in the directory
+Flags a user who holds a strong Azure RBAC role (Owner/Contributor/User Access
+Administrator/wildcard) at subscription scope while being a **weak** directory identity - their
+highest Entra directory role is at or below `WEAK_USER_DIRECTORY_ROLE_TIER` (default 1, i.e. no
+admin role). These are ordinary, often less-protected accounts that nonetheless control a whole
+subscription, concentrating blast radius on low-privileged users. Compromising one normal user
+then yields subscription-level control.
+
+### 8. Managed Identities with strong subscription roles
+Managed Identities are Service Principals (`servicePrincipalType == 'ManagedIdentity'`) whose
+credentials Azure hands to a compute resource. A Managed Identity holding a strong subscription
+role is surfaced as a distinct row/finding in the enterprise-app table (via the
+`service_principal_type` column), because the escalation vector differs: whoever controls the
+compute resource's control plane (or runs code on it) can obtain the identity's token from the
+instance metadata endpoint and act with its subscription-level power.
+
 ## Required Microsoft Graph permissions
 
 In addition to what upstream ScoutSuite's Azure AD (`aad`) module already requires
@@ -101,6 +171,7 @@ want to scope credentials more tightly:
 | `GET /servicePrincipals/{id}/appRoleAssignments` | `Application.Read.All` (or `Directory.Read.All`) |
 | `GET /oauth2PermissionGrants?$filter=clientId eq ...` | `DelegatedPermissionGrant.Read.All` (or `Directory.Read.All`) |
 | `GET /directoryRoles` and `.../members` | `RoleManagement.Read.Directory` (or `Directory.Read.All`) |
+| `GET /applications/{id}/federatedIdentityCredentials` | `Application.Read.All` (or `Directory.Read.All`) |
 
 As with the rest of ScoutSuite's Azure AD module, these are **read-only** application permissions
 granted to the service principal ScoutSuite authenticates as - running these checks does not
@@ -108,13 +179,13 @@ require, and does not use, any write permission.
 
 ## Running the checks
 
-The two findings are enabled by default in `rules/rulesets/default.json`. Run as usual:
+All the findings are enabled by default in `rules/rulesets/default.json`. Run as usual:
 
 ```bash
 scout azure --cli  # or whatever auth method you use
 ```
 
-To only see these two checks, copy `default.json`, disable everything else, and pass it via
+To only see these checks, copy `default.json`, disable everything else, and pass it via
 `--ruleset`:
 
 ```bash
@@ -129,6 +200,12 @@ scout azure --cli --ruleset my-entra-privesc-ruleset.json
   permissions not yet listed.
 - "Owners" is used as a stand-in for "creator" (see above); it is not literally who created the
   application/service principal.
-- Both checks require the extra Graph permissions above; if ScoutSuite's credentials lack them,
+- The dangerous-combination and directory-tier thresholds are curated heuristics tuned to catch
+  well-documented escalation paths; adjust the JSON tables and the tier constants in
+  `entra_privesc.py` for your environment.
+- Federated-credential breadth is a heuristic keyed on known CI issuers (GitHub/GitLab/Azure
+  DevOps); a specific subject on an issuer not in `broad_federated_credential_patterns.json` is
+  not flagged.
+- All checks require the extra Graph permissions above; if ScoutSuite's credentials lack them,
   the corresponding calls fail gracefully (logged, returned empty) and the checks simply won't
   fire for that data rather than erroring out the whole scan.

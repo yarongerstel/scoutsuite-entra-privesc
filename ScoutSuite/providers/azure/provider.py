@@ -81,16 +81,44 @@ class AzureProvider(BaseProvider):
 
     def _compute_entra_privesc_checks(self):
         """
-        Computes the two Entra ID privilege-escalation cross-resource checks (see
-        ScoutSuite.providers.azure.entra_privesc for details): App Registration
-        owner-vs-granted-permissions, and Enterprise Application strong subscription roles.
+        Computes the Entra ID privilege-escalation cross-resource checks (see
+        ScoutSuite.providers.azure.entra_privesc for details): App Registration and Service
+        Principal owner-vs-granted-permissions, dangerous permission combinations, overly-broad
+        federated identity credentials, guest users with strong roles, and the Enterprise
+        Application (incl. Managed Identity) strong subscription-role table.
         """
         try:
             if 'aad' in self.service_list:
+                aad = self.services['aad']
+                rbac_subscriptions = self.services['rbac']['subscriptions'] \
+                    if 'rbac' in self.service_list else {}
+
                 entra_privesc.compute_app_owner_privilege_escalation(
-                    applications=self.services['aad']['applications'],
-                    service_principals=self.services['aad']['service_principals'],
-                    directory_roles=self.services['aad']['directory_roles'])
+                    applications=aad['applications'],
+                    service_principals=aad['service_principals'],
+                    directory_roles=aad['directory_roles'])
+
+                entra_privesc.compute_sp_owner_privilege_escalation(
+                    service_principals=aad['service_principals'],
+                    directory_roles=aad['directory_roles'])
+
+                # Must run after the owner-privesc functions, which populate granted_permissions
+                entra_privesc.compute_dangerous_permission_combinations(
+                    applications=aad['applications'],
+                    service_principals=aad['service_principals'])
+
+                entra_privesc.compute_broad_federated_credentials(
+                    applications=aad['applications'])
+
+                entra_privesc.compute_guest_strong_roles(
+                    users=aad['users'],
+                    directory_roles=aad['directory_roles'],
+                    rbac_subscriptions=rbac_subscriptions)
+
+                entra_privesc.compute_users_strong_subscription_but_weak_directory(
+                    users=aad['users'],
+                    directory_roles=aad['directory_roles'],
+                    rbac_subscriptions=rbac_subscriptions)
 
             if 'aad' in self.service_list and 'rbac' in self.service_list:
                 table = entra_privesc.compute_enterprise_app_subscription_privilege_table(

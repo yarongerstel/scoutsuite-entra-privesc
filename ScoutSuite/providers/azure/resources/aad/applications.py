@@ -51,4 +51,18 @@ class Applications(AzureResources):
         raw_owners = await self.facade.aad.get_application_owners(application_dict['id'])
         application_dict['owners'] = normalize_owners(raw_owners)
 
+        raw_federated_credentials = \
+            await self.facade.aad.get_application_federated_identity_credentials(application_dict['id'])
+        application_dict['federated_identity_credentials'] = [
+            {
+                'id': fic.get('id'),
+                'name': fic.get('name'),
+                'issuer': fic.get('issuer'),
+                'subject': fic.get('subject'),
+                'audiences': fic.get('audiences'),
+                'claims_matching_expression': fic.get('claimsMatchingExpression'),
+            }
+            for fic in raw_federated_credentials or []
+        ]
+
         return application_dict['id'], application_dict

@@ -1,0 +1,21 @@
+{
+    "description": "Enterprise Application (Service Principal) Owner Has Weaker Directory Role Than the App's Granted Permissions",
+    "rationale": "A Service Principal (Enterprise Application) can have its own owners, distinct from the owners of the underlying App Registration. An owner can add credentials to the service principal and authenticate as it, inheriting the Microsoft Graph Application permissions it has been granted - regardless of the owner's own directory role. If the granted permissions outrank the highest Entra directory role held by any owner, an owner (or anyone who compromises an owner account) can use the service principal to escalate beyond their assigned privilege level.",
+    "remediation": "Review the owners of the flagged service principal. Remove owners who should not be able to wield the app's permissions, reduce the granted Microsoft Graph permissions to least privilege, or ensure only sufficiently privileged and trusted principals own highly-permissioned enterprise applications. Prefer managing ownership of sensitive apps through Privileged Identity Management.",
+    "references": [
+        "https://learn.microsoft.com/en-us/entra/identity-platform/security-best-practices-for-app-registration",
+        "https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/best-practices",
+        "https://posts.specterops.io/azure-privilege-escalation-via-azure-api-permissions-abuse-74aee1006f48"
+    ],
+    "dashboard_name": "Enterprise Applications",
+    "path": "aad.service_principals.id",
+    "conditions": [
+        "and",
+        [
+            "aad.service_principals.id.owner_weaker_than_app_permissions",
+            "true",
+            ""
+        ]
+    ],
+    "id_suffix": "owner_weaker_than_app_permissions"
+}

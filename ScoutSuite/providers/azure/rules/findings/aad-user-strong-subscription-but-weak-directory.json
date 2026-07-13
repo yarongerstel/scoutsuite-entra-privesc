@@ -1,0 +1,21 @@
+{
+    "description": "User Holds a Strong Subscription Role Despite Being a Weak Directory Identity",
+    "rationale": "This user holds a strong Azure RBAC role (Owner, Contributor, User Access Administrator, or a custom role with broad/wildcard actions) at subscription scope, yet is itself a weak identity in Entra ID - holding no administrative directory role. Such accounts are powerful on the Azure resource control plane while being ordinary, often less-protected, directory accounts (frequently without the monitoring, Conditional Access, or PIM controls applied to admin accounts). Compromising one ordinary user then yields subscription-level control, concentrating blast radius on low-privileged accounts and creating a privilege-escalation path from a normal user to full control of a subscription.",
+    "remediation": "Review each flagged user and confirm they genuinely need a strong subscription role. Prefer scoping their access to the narrowest role, resource group, or resource required, use Privileged Identity Management for just-in-time and time-bound elevation instead of standing Owner/Contributor assignments, and ensure any account holding subscription-level power is protected with strong authentication and Conditional Access commensurate with that power.",
+    "references": [
+        "https://learn.microsoft.com/en-us/azure/role-based-access-control/best-practices",
+        "https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/pim-configure",
+        "https://learn.microsoft.com/en-us/security/benchmark/azure/mcsb-privileged-access"
+    ],
+    "dashboard_name": "Users",
+    "path": "aad.users.id",
+    "conditions": [
+        "and",
+        [
+            "aad.users.id.strong_subscription_role_but_weak_directory",
+            "true",
+            ""
+        ]
+    ],
+    "id_suffix": "strong_subscription_role_but_weak_directory"
+}
