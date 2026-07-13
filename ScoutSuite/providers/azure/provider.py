@@ -135,6 +135,8 @@ class AzureProvider(BaseProvider):
                     service_principals=self.services['aad']['service_principals'],
                     rbac_subscriptions=self.services['rbac']['subscriptions'])
                 self.services['aad']['enterprise_apps_with_strong_subscription_roles'] = table
+                # The HTML report only paginates/loads a resource that has a matching *_count key.
+                self.services['aad']['enterprise_apps_with_strong_subscription_roles_count'] = len(table)
 
                 # Must run after the table above, which populates strong_subscription_roles.
                 entra_privesc.compute_app_owner_subscription_escalation(
@@ -145,12 +147,14 @@ class AzureProvider(BaseProvider):
 
                 # Baseline: every standing (active) role-granting assignment at subscription scope,
                 # for any principal type - independent of the escalation-correlation checks.
-                self.services['aad']['standing_privileged_subscription_role_assignments'] = \
-                    entra_privesc.compute_standing_privileged_subscription_assignments(
-                        rbac_subscriptions=self.services['rbac']['subscriptions'],
-                        users=self.services['aad']['users'],
-                        groups=self.services['aad']['groups'],
-                        service_principals=self.services['aad']['service_principals'])
+                standing_table = entra_privesc.compute_standing_privileged_subscription_assignments(
+                    rbac_subscriptions=self.services['rbac']['subscriptions'],
+                    users=self.services['aad']['users'],
+                    groups=self.services['aad']['groups'],
+                    service_principals=self.services['aad']['service_principals'])
+                self.services['aad']['standing_privileged_subscription_role_assignments'] = standing_table
+                self.services['aad']['standing_privileged_subscription_role_assignments_count'] = \
+                    len(standing_table)
         except Exception as e:
             print_exception(f'Unable to compute Entra privilege escalation checks: {e}')
 

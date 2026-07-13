@@ -544,6 +544,8 @@ def compute_standing_privileged_subscription_assignments(rbac_subscriptions, use
                 row_id = assignment.get('id') or f"{principal_id}::{subscription_id}::{role_id}"
                 table[row_id] = {
                     'id': row_id,
+                    # 'name' is what the HTML report shows in the list / left menu for each row.
+                    'name': f"{principal_name} - {role.get('name')}",
                     'principal_id': principal_id,
                     'principal_name': principal_name,
                     # Prefer the type resolved from the fetched directory objects; fall back to
