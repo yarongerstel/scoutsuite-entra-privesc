@@ -79,6 +79,9 @@ class AWSProvider(BaseProvider):
         if 'ec2' in self.service_list and 'iam' in self.service_list:
             self._match_instances_and_roles()
         
+        if 'vpc' in self.service_list:
+            self._set_subnet_effective_flow_logs()
+
         if 'ec2' in self.service_list and 'vpc' in self.service_list:
             self._match_instances_and_vpcs()
             self._match_instances_and_subnets()
@@ -629,6 +632,35 @@ class AWSProvider(BaseProvider):
                     print_exception(f'Failed to parse {resource_type}')
                 else:
                     print_exception(f'Failed to parse {resource_type}: {e}')
+
+    def _set_subnet_effective_flow_logs(self):
+        """
+        A VPC Flow Log can be created at the VPC, subnet, or ENI level; a VPC-level flow log
+        captures traffic for every subnet in that VPC. The 'subnet without a flow log' finding
+        must therefore not flag a subnet whose parent VPC already has a flow log. This computes,
+        for each subnet, an explicit `no_flow_log_considering_vpc` flag that is True only when
+        NEITHER the subnet itself NOR its parent VPC has a flow log.
+
+        The flag is derived directly from the region-level flow logs collection (the source of
+        truth, keyed by flow log with a `resource_id` of the vpc-/subnet- it is attached to), so
+        it is correct regardless of whether the fetch-time propagation of VPC flow logs onto
+        subnets ran (e.g. on `--local` re-analysis). Existing per-object `flow_logs` fields are
+        also honoured as a fallback.
+        """
+        vpc_config = self.services.get('vpc', {})
+        for region_id, region in vpc_config.get('regions', {}).items():
+            flow_log_resource_ids = {
+                flow_log.get('resource_id')
+                for flow_log in region.get('flow_logs', {}).values()
+                if flow_log.get('resource_id')
+            }
+            for vpc_id, vpc in region.get('vpcs', {}).items():
+                vpc_has_flow_log = bool(vpc.get('flow_logs')) or vpc_id in flow_log_resource_ids
+                for subnet_id, subnet in vpc.get('subnets', {}).items():
+                    subnet_has_own_flow_log = \
+                        bool(subnet.get('flow_logs')) or subnet_id in flow_log_resource_ids
+                    subnet['no_flow_log_considering_vpc'] = \
+                        not (subnet_has_own_flow_log or vpc_has_flow_log)
 
     def _set_emr_vpc_ids(self):
         clear_list = []
