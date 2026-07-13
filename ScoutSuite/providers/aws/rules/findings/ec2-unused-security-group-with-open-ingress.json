@@ -1,0 +1,19 @@
+{
+    "description": "Unused Security Group Open to the Internet",
+    "rationale": "This security group has an ingress rule open to the whole internet (0.0.0.0/0 or ::/0) but is not attached to any resource. Because nothing is using it, there is currently no internet-reachable resource behind this rule, so the real-world exposure is low - but the permissive, unused group is still worth cleaning up: it could later be attached to a resource and silently expose it, and it adds noise that hides genuinely risky groups. The higher-severity 'Security Group Opens ...' findings still report the permissive rule itself; this low-severity finding adds the context that this particular group is not in use.",
+    "remediation": "Delete the unused security group, or if it is kept intentionally, tighten its ingress rules to the minimum source ranges needed so it is not internet-open if it is later attached to a resource.",
+    "references": [
+        "https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-groups.html"
+    ],
+    "dashboard_name": "Security Groups",
+    "path": "ec2.regions.id.vpcs.id.security_groups.id",
+    "conditions": [
+        "and",
+        [
+            "ec2.regions.id.vpcs.id.security_groups.id.unused_with_internet_open_ingress",
+            "true",
+            ""
+        ]
+    ],
+    "id_suffix": "unused_with_internet_open_ingress"
+}

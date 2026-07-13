@@ -382,6 +382,12 @@
                 "level": "warning"
             }
         ],
+        "ec2-unused-security-group-with-open-ingress.json": [
+            {
+                "enabled": true,
+                "level": "warning"
+            }
+        ],
         "elb-listener-allowing-cleartext.json": [
             {
                 "enabled": true,

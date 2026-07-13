@@ -109,6 +109,11 @@ class AWSProvider(BaseProvider):
 
         super().preprocessing()
 
+        # Must run AFTER super().preprocessing(), which populates security groups' `used_by`
+        # via the metadata callbacks.
+        if 'ec2' in self.service_list:
+            self._flag_unused_security_groups_with_open_ingress()
+
     def _add_cidr_display_name(self, ip_ranges, ip_ranges_name_key):
         if len(ip_ranges):
             callback_args = {'ip_ranges': ip_ranges,
@@ -670,6 +675,43 @@ class AWSProvider(BaseProvider):
                         not (subnet_has_own_flow_log or vpc_has_own_flow_log)
                     subnet['flow_log_only_at_vpc_level'] = \
                         (not subnet_has_own_flow_log) and vpc_has_own_flow_log
+
+    def _flag_unused_security_groups_with_open_ingress(self):
+        """
+        The `ec2-security-group-opens-*` findings flag a security group that exposes ports to
+        the internet regardless of whether the security group is actually attached to anything.
+        A permissive rule on a security group that is not in use is a much lower real-world risk
+        (nothing is reachable through it) - but it is still worth surfacing as a clean-up item.
+
+        This sets `unused_with_internet_open_ingress` on each security group, True when the group
+        is not attached to any resource (no `used_by`, and not the account's default group) AND
+        it has at least one ingress rule open to the whole internet (0.0.0.0/0 or ::/0). A
+        dedicated low-severity finding reports these without inflating the severity of a genuinely
+        internet-reachable, in-use permissive group.
+        """
+        internet_cidrs = {'0.0.0.0/0', '::/0'}
+        ec2_config = self.services.get('ec2', {})
+        for region in ec2_config.get('regions', {}).values():
+            for vpc in region.get('vpcs', {}).values():
+                for security_group in vpc.get('security_groups', {}).values():
+                    is_unused = not security_group.get('used_by') \
+                        and security_group.get('name') != 'default'
+
+                    has_internet_open_ingress = False
+                    ingress = security_group.get('rules', {}).get('ingress', {}).get('protocols', {})
+                    for protocol in ingress.values():
+                        for port in protocol.get('ports', {}).values():
+                            for cidr in port.get('cidrs', []):
+                                if cidr.get('CIDR') in internet_cidrs:
+                                    has_internet_open_ingress = True
+                                    break
+                            if has_internet_open_ingress:
+                                break
+                        if has_internet_open_ingress:
+                            break
+
+                    security_group['unused_with_internet_open_ingress'] = \
+                        is_unused and has_internet_open_ingress
 
     def _set_emr_vpc_ids(self):
         clear_list = []
