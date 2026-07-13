@@ -1,6 +1,7 @@
 from msgraph.core import GraphClient
 
 from ScoutSuite.core.console import print_exception
+from ScoutSuite.providers.utils import run_concurrently
 
 
 class AADFacade:
@@ -15,7 +16,10 @@ class AADFacade:
         client = GraphClient(credential=self.credentials.get_credentials(), scopes=scopes)
         endpoint = 'https://graph.microsoft.com/{}/{}'.format(api_version, api_resource)
         try:
-            response = client.get(endpoint)
+            # msgraph-core 0.2.2's GraphClient is synchronous (requests-based); run it in the
+            # thread-pool executor so the blocking HTTP call does not freeze the event loop and
+            # multiple Graph calls can run concurrently.
+            response = await run_concurrently(lambda: client.get(endpoint))
             if response.status_code == 200:
                 return response.json()
             # If response is 404 then it means there is no resource associated with the provided id
@@ -41,7 +45,9 @@ class AADFacade:
         values = []
         try:
             while endpoint:
-                response = client.get(endpoint)
+                # Run the blocking (synchronous, requests-based) call in the executor. Bind
+                # `endpoint` via a default arg so each iteration's lambda captures its own value.
+                response = await run_concurrently(lambda ep=endpoint: client.get(ep))
                 if response.status_code == 200:
                     response_json = response.json()
                     values.extend(response_json.get('value', []))

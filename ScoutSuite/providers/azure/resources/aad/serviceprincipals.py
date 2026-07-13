@@ -1,14 +1,23 @@
 from ScoutSuite.providers.azure.resources.base import AzureResources
 from ScoutSuite.providers.azure.resources.aad.owners import normalize_owners
+from ScoutSuite.providers.utils import map_concurrently
 
 
 class ServicePrincipals(AzureResources):
     async def fetch_all(self):
-        for raw_service_principal in await self.facade.aad.get_service_principals():
-            id, service_principal = await self._parse_service_principal(raw_service_principal)
-            # exclude built-in service principals
-            if service_principal['publisher_name'] != 'Microsoft Services':
-                self[id] = service_principal
+        raw_service_principals = await self.facade.aad.get_service_principals()
+        # Exclude built-in Microsoft service principals BEFORE issuing the per-SP Graph calls
+        # (owners, appRoleAssignments, oauth2 grants) - otherwise those calls are made and then
+        # thrown away for every first-party Microsoft SP (there are often hundreds).
+        raw_service_principals = [
+            raw for raw in raw_service_principals
+            if raw.get('publisherName') != 'Microsoft Services'
+        ]
+        # Parse the remaining service principals concurrently.
+        parsing_results = await map_concurrently(
+            self._parse_service_principal, raw_service_principals)
+        for id, service_principal in parsing_results:
+            self[id] = service_principal
 
     async def _parse_service_principal(self, raw_service_principal):
         service_principal_dict = {}

@@ -1,5 +1,6 @@
 from ScoutSuite.providers.azure.resources.base import AzureResources
 from ScoutSuite.providers.azure.resources.aad.owners import normalize_owners
+from ScoutSuite.providers.utils import map_concurrently
 
 
 class DirectoryRoles(AzureResources):
@@ -11,8 +12,10 @@ class DirectoryRoles(AzureResources):
     """
 
     async def fetch_all(self):
-        for raw_directory_role in await self.facade.aad.get_directory_roles():
-            id, directory_role = await self._parse_directory_role(raw_directory_role)
+        # Each _parse_directory_role fetches the role's members, so fan them out concurrently.
+        parsing_results = await map_concurrently(
+            self._parse_directory_role, await self.facade.aad.get_directory_roles())
+        for id, directory_role in parsing_results:
             self[id] = directory_role
 
     async def _parse_directory_role(self, raw_directory_role):

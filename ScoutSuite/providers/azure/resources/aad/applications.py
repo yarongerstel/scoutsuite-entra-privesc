@@ -1,11 +1,15 @@
 from ScoutSuite.providers.azure.resources.base import AzureResources
 from ScoutSuite.providers.azure.resources.aad.owners import normalize_owners
+from ScoutSuite.providers.utils import map_concurrently
 
 
 class Applications(AzureResources):
     async def fetch_all(self):
-        for raw_application in await self.facade.aad.get_applications():
-            id, application = await self._parse_application(raw_application)
+        # Parse applications concurrently: each _parse_application issues per-app Graph calls
+        # (owners, federated credentials), so fanning them out avoids a slow sequential loop.
+        parsing_results = await map_concurrently(
+            self._parse_application, await self.facade.aad.get_applications())
+        for id, application in parsing_results:
             self[id] = application
 
     async def _parse_application(self, raw_application):
