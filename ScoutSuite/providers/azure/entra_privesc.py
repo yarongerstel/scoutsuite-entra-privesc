@@ -492,7 +492,8 @@ def _principals_with_strong_subscription_role(rbac_subscriptions):
     return result
 
 
-def compute_app_owner_subscription_escalation(applications, service_principals, rbac_subscriptions):
+def compute_app_owner_subscription_escalation(applications, service_principals, rbac_subscriptions,
+                                              groups=None):
     """
     Flags an App Registration whose service principal holds a strong Azure RBAC role at
     subscription scope when an owner of the app does NOT already hold a strong role on that same
@@ -502,19 +503,38 @@ def compute_app_owner_subscription_escalation(applications, service_principals, 
     of an Azure subscription. This is the subscription/Azure-RBAC counterpart to the
     directory/Graph-permission owner check (compute_app_owner_privilege_escalation).
 
+    An owner is considered to already have subscription access if they hold a strong role
+    directly OR through membership in a group that holds a strong role on that subscription.
+
     Must run AFTER compute_enterprise_app_subscription_privilege_table, which populates each
     service principal's strong_subscription_roles. Mutates each application dict with
     owner_subscription_escalations (list of {owner, subscription_id, role_name}) and
     owner_escalates_to_subscription (bool).
 
-    Limitation: owner subscription access is checked via DIRECT role assignments only; an owner
-    who holds the role via a group is not detected here and may be flagged (documented).
+    Limitation: group membership resolution is best-effort, based on the group memberships
+    ScoutSuite has fetched (guests + users referenced by role assignments); an owner whose group
+    membership was not fetched cannot be resolved and may still be flagged.
     """
     try:
         sp_by_app_id = {
             sp.get('app_id'): sp for sp in service_principals.values() if sp.get('app_id')
         }
         strong_principals_by_sub = _principals_with_strong_subscription_role(rbac_subscriptions)
+        # group_id -> set(member ids). Populated by AAD.assign_group_memberships().
+        group_members = {
+            group_id: set(group.get('users') or [])
+            for group_id, group in (groups or {}).items()
+        }
+
+        def owner_has_subscription_access(owner_id, subscription_id):
+            strong_principals = strong_principals_by_sub.get(subscription_id, set())
+            if owner_id in strong_principals:
+                return True
+            # via group membership: a strong principal that is a group containing the owner
+            for principal_id in strong_principals:
+                if owner_id in group_members.get(principal_id, ()):
+                    return True
+            return False
 
         for application in applications.values():
             matching_sp = sp_by_app_id.get(application.get('app_id'))
@@ -526,7 +546,7 @@ def compute_app_owner_subscription_escalation(applications, service_principals, 
                 owner_label = owner.get('display_name') or owner.get('user_principal_name') or owner_id
                 for role in app_strong_sub_roles:
                     subscription_id = role.get('subscription_id')
-                    if owner_id not in strong_principals_by_sub.get(subscription_id, set()):
+                    if not owner_has_subscription_access(owner_id, subscription_id):
                         escalations.append({
                             'owner': owner_label,
                             'subscription_id': subscription_id,

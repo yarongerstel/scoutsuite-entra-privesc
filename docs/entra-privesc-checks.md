@@ -154,9 +154,11 @@ counterpart to check 1. Flags an App Registration whose service principal holds 
 RBAC role at subscription scope when an owner does **not** already hold a strong role on that
 subscription. The owner can add credentials to the app, authenticate as its service principal,
 and gain subscription-level control (e.g. Owner/Contributor) they don't otherwise have - the exact
-"owner has only directory permissions, escalates to a subscription via the app" path. Owner
-subscription access is checked via **direct** role assignments only; an owner who holds the role
-through a group is not detected and may be flagged (documented limitation).
+"owner has only directory permissions, escalates to a subscription via the app" path. An owner is
+treated as already having the access if they hold a strong role **directly or through a group**
+that holds it. Group resolution is best-effort, based on the group memberships ScoutSuite has
+fetched; an owner whose membership wasn't fetched may still be flagged. Directory-role privilege
+(used elsewhere) also counts PIM-**eligible** roles, not just active ones.
 
 ### 8. Managed Identities with strong subscription roles
 Managed Identities are Service Principals (`servicePrincipalType == 'ManagedIdentity'`) whose
