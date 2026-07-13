@@ -148,6 +148,19 @@ admin role). These are ordinary, often less-protected accounts that nonetheless 
 subscription, concentrating blast radius on low-privileged users. Compromising one normal user
 then yields subscription-level control.
 
+### 10. Standing privilege-escalation-capable subscription role assignment (baseline)
+`aad-standing-privileged-subscription-role-assignment` (danger). Unlike the other checks (which
+are conditional/correlational), this is a **baseline least-privilege** check: it flags **every**
+standing (active, non-PIM) role assignment at subscription scope of a role that can assign other
+roles - Owner, User Access Administrator, RBAC Administrator, or a custom role with
+`Microsoft.Authorization/roleAssignments/write` / wildcard - for **any** principal type (User,
+Group, Service Principal, Managed Identity). This mirrors the "persistent User Access
+Administrator / avoid standing high-privilege access" finding that tools like Prowler report, and
+fills the gap the correlational checks leave (e.g. a User who holds User Access Administrator but
+is *not* weak in the directory, so check 7 does not fire). Contributor is deliberately excluded
+(it is "strong" but cannot assign roles). Principal type is resolved from the fetched directory
+objects, so it is robust to Azure ARM reporting `principalType: 'Unknown'`.
+
 ### 9. App Registration owner can escalate to subscription control
 `aad-app-registration-owner-escalates-to-subscription` (danger). The subscription/Azure-RBAC
 counterpart to check 1. Flags an App Registration whose service principal holds a strong Azure

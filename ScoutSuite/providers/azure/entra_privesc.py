@@ -89,6 +89,12 @@ _STRONG_BUILT_IN_ROLE_NAMES = {
 _STRONG_ACTION_PATTERNS = [
     pattern.lower() for pattern in _subscription_role_strength_data['strong_action_patterns']
 ]
+_ROLE_GRANTING_BUILT_IN_ROLE_NAMES = {
+    name.lower() for name in _subscription_role_strength_data.get('role_granting_built_in_role_names', [])
+}
+_ROLE_GRANTING_ACTION_PATTERNS = [
+    pattern.lower() for pattern in _subscription_role_strength_data.get('role_granting_action_patterns', [])
+]
 
 # List of {name, permissions (set of lowercased names), rationale}
 _DANGEROUS_COMBINATIONS = [
@@ -133,6 +139,26 @@ def is_subscription_role_strong(role_dict):
         for action in permission.actions if hasattr(permission, 'actions') else permission.get('actions', []):
             action_lower = (action or '').lower()
             if action_lower in _STRONG_ACTION_PATTERNS:
+                return True
+    return False
+
+
+def is_role_granting_subscription_role(role_dict):
+    """
+    A subscription-scope RBAC role that can assign OTHER roles - i.e. the privilege-escalation
+    primitive itself (Owner, User Access Administrator, RBAC Administrator, or any custom role
+    with Microsoft.Authorization/roleAssignments/write or a wildcard). Deliberately narrower than
+    is_subscription_role_strong(): Contributor is 'strong' but is NOT role-granting (it cannot
+    assign roles), so it is excluded here.
+    """
+    name = (role_dict.get('name') or '').lower()
+    if name in _ROLE_GRANTING_BUILT_IN_ROLE_NAMES:
+        return True
+    if role_dict.get('custom_subscription_owner_role'):
+        return True
+    for permission in role_dict.get('permissions') or []:
+        for action in permission.actions if hasattr(permission, 'actions') else permission.get('actions', []):
+            if (action or '').lower() in _ROLE_GRANTING_ACTION_PATTERNS:
                 return True
     return False
 
@@ -473,6 +499,61 @@ def compute_enterprise_app_subscription_privilege_table(service_principals, rbac
             )
     except Exception as e:
         print_exception(f'Unable to compute enterprise app subscription privilege table: {e}')
+
+    return table
+
+
+def compute_standing_privileged_subscription_assignments(rbac_subscriptions, users=None, groups=None,
+                                                         service_principals=None):
+    """
+    Builds (and returns) a table, keyed by role-assignment id, of every STANDING (active, i.e.
+    not PIM just-in-time) role assignment at subscription scope where the role can assign other
+    roles (Owner, User Access Administrator, RBAC Administrator, or a custom role with
+    roleAssignments/write / wildcard). This is a baseline least-privilege finding - independent
+    of the escalation-correlation checks - covering ANY principal type (User, Group, Service
+    Principal, Managed Identity), matching the 'persistent privileged access' class of finding.
+
+    Principal type/name are resolved against the fetched aad collections (users/groups/service
+    principals) rather than trusting Azure's reported principal_type, which can be 'Unknown'.
+    Each row: principal_id, principal_name, principal_type, subscription_id, role_name.
+    """
+    table = {}
+    try:
+        def resolve_principal(principal_id):
+            for collection, principal_type in (
+                    (users, 'User'), (groups, 'Group'), (service_principals, 'ServicePrincipal')):
+                obj = collection.get(principal_id) if collection else None
+                if obj:
+                    name = obj.get('name') or obj.get('display_name') or obj.get('app_name') \
+                        or principal_id
+                    return name, principal_type
+            return principal_id, None
+
+        for subscription_id, subscription in (rbac_subscriptions or {}).items():
+            roles_by_id = subscription.get('roles', {})
+            for assignment in subscription.get('role_assignments', {}).values():
+                if assignment.get('scope') != f'/subscriptions/{subscription_id}':
+                    continue
+                role_id = assignment['role_definition_id'].split('/')[-1]
+                role = roles_by_id.get(role_id)
+                if not role or not is_role_granting_subscription_role(role):
+                    continue
+
+                principal_id = assignment.get('principal_id')
+                principal_name, resolved_type = resolve_principal(principal_id)
+                row_id = assignment.get('id') or f"{principal_id}::{subscription_id}::{role_id}"
+                table[row_id] = {
+                    'id': row_id,
+                    'principal_id': principal_id,
+                    'principal_name': principal_name,
+                    # Prefer the type resolved from the fetched directory objects; fall back to
+                    # Azure's reported type (which may be 'Unknown').
+                    'principal_type': resolved_type or assignment.get('principal_type'),
+                    'subscription_id': subscription_id,
+                    'role_name': role.get('name'),
+                }
+    except Exception as e:
+        print_exception(f'Unable to compute standing privileged subscription assignments: {e}')
 
     return table
 

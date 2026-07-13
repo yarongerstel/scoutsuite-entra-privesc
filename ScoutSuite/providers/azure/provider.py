@@ -142,6 +142,15 @@ class AzureProvider(BaseProvider):
                     service_principals=self.services['aad']['service_principals'],
                     rbac_subscriptions=self.services['rbac']['subscriptions'],
                     groups=self.services['aad']['groups'])
+
+                # Baseline: every standing (active) role-granting assignment at subscription scope,
+                # for any principal type - independent of the escalation-correlation checks.
+                self.services['aad']['standing_privileged_subscription_role_assignments'] = \
+                    entra_privesc.compute_standing_privileged_subscription_assignments(
+                        rbac_subscriptions=self.services['rbac']['subscriptions'],
+                        users=self.services['aad']['users'],
+                        groups=self.services['aad']['groups'],
+                        service_principals=self.services['aad']['service_principals'])
         except Exception as e:
             print_exception(f'Unable to compute Entra privilege escalation checks: {e}')
 

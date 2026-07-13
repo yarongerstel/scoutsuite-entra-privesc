@@ -1,0 +1,21 @@
+{
+    "description": "Standing Privilege-Escalation-Capable Role Assignment on a Subscription",
+    "rationale": "This is a standing (permanent, always-active) role assignment at subscription scope of a role that can assign other roles - Owner, User Access Administrator, RBAC Administrator, or a custom role with Microsoft.Authorization/roleAssignments/write. These roles are the privilege-escalation primitive on the Azure control plane: whoever holds one can grant any role (including to themselves or to a new identity they control) on the subscription. User Access Administrator in particular has no data-plane purpose and rarely has a legitimate reason to be held permanently. A standing assignment (as opposed to a time-bound, approval-based PIM activation) means the privilege is available at all times, so a single compromised principal yields immediate, persistent control over access on the subscription. Applies to any principal type - User, Group, Service Principal, or Managed Identity.",
+    "remediation": "Apply least privilege and avoid standing high-privilege access: <ol><li>Remove unnecessary Owner / User Access Administrator assignments, especially any that are not clearly required.</li><li>Replace standing assignments with time-bound, approval-based, MFA-gated elevation using Privileged Identity Management (PIM).</li><li>Scope access to the narrowest subscription / resource group / resource that is actually needed.</li><li>Review the assignments regularly and monitor role-assignment activity.</li></ol>",
+    "references": [
+        "https://learn.microsoft.com/en-us/azure/role-based-access-control/best-practices",
+        "https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/pim-configure",
+        "https://learn.microsoft.com/en-us/security/benchmark/azure/mcsb-privileged-access"
+    ],
+    "dashboard_name": "Standing Privileged Subscription Role Assignments",
+    "path": "aad.standing_privileged_subscription_role_assignments.id",
+    "conditions": [
+        "and",
+        [
+            "aad.standing_privileged_subscription_role_assignments.id.role_name",
+            "notEmpty",
+            ""
+        ]
+    ],
+    "id_suffix": "standing_privileged_subscription_role_assignment"
+}

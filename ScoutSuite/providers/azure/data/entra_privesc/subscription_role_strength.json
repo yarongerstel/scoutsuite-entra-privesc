@@ -1,14 +1,24 @@
 {
-  "_comment": "Classification of Azure RBAC roles as 'strong' at subscription scope: built-in roles that grant broad control over the subscription, plus any role (built-in or custom) whose actions include a wildcard-style grant over the whole subscription or over Microsoft.Authorization (which allows granting further roles / privilege escalation).",
+  "_comment": "Classification of Azure RBAC roles at subscription scope. 'strong' = built-in roles that grant broad control (incl. Contributor), plus any role whose actions include a wildcard-style or Microsoft.Authorization grant. 'role_granting' = the narrower set of roles that can assign OTHER roles (write role assignments) - the actual privilege-escalation primitive (Owner and User Access Administrator; Contributor deliberately excluded as it cannot assign roles), used for the standing-privileged-assignment check.",
   "strong_built_in_role_names": [
     "Owner",
     "Contributor",
     "User Access Administrator"
+  ],
+  "role_granting_built_in_role_names": [
+    "Owner",
+    "User Access Administrator",
+    "Role Based Access Control Administrator"
   ],
   "strong_action_patterns": [
     "*",
     "microsoft.authorization/*",
     "microsoft.authorization/roleassignments/write",
     "microsoft.authorization/roledefinitions/write"
+  ],
+  "role_granting_action_patterns": [
+    "*",
+    "microsoft.authorization/*",
+    "microsoft.authorization/roleassignments/write"
   ]
 }

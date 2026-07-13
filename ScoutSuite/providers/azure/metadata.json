@@ -83,6 +83,10 @@
         "enterprise_apps_with_strong_subscription_roles": {
           "cols": 4,
           "path": "services.aad.enterprise_apps_with_strong_subscription_roles"
+        },
+        "standing_privileged_subscription_role_assignments": {
+          "cols": 4,
+          "path": "services.aad.standing_privileged_subscription_role_assignments"
         }
       }
     },
