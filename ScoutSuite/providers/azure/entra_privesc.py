@@ -426,8 +426,18 @@ def compute_enterprise_app_subscription_privilege_table(service_principals, rbac
         for subscription_id, subscription in rbac_subscriptions.items():
             roles_by_id = subscription.get('roles', {})
             for assignment in subscription.get('role_assignments', {}).values():
-                if assignment.get('principal_type') != 'ServicePrincipal':
+                # Match by principal ID against the fetched service principals rather than
+                # trusting Azure's reported `principal_type`. Azure Resource Manager's role
+                # assignments API can return principalType 'Unknown' for a genuine Service
+                # Principal (a known ARM quirk - e.g. when ARM's own AAD lookup at read time
+                # doesn't resolve), which would silently hide a real SP-held role if filtered on
+                # that field - this mirrors the same robust ID-based approach already used by
+                # AzureProvider._match_rbac_roles_and_principals(), which does not check
+                # principal_type at all.
+                service_principal = service_principals.get(assignment.get('principal_id'))
+                if not service_principal:
                     continue
+
                 # Only assignments scoped to the subscription itself (not a narrower RG/resource)
                 if assignment.get('scope') != f'/subscriptions/{subscription_id}':
                     continue
@@ -435,10 +445,6 @@ def compute_enterprise_app_subscription_privilege_table(service_principals, rbac
                 role_id = assignment['role_definition_id'].split('/')[-1]
                 role = roles_by_id.get(role_id)
                 if not role or not is_subscription_role_strong(role):
-                    continue
-
-                service_principal = service_principals.get(assignment['principal_id'])
-                if not service_principal:
                     continue
 
                 service_principal.setdefault('strong_subscription_roles', []).append({
