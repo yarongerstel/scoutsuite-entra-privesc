@@ -438,3 +438,71 @@ def compute_enterprise_app_subscription_privilege_table(service_principals, rbac
         print_exception(f'Unable to compute enterprise app subscription privilege table: {e}')
 
     return table
+
+
+def _principals_with_strong_subscription_role(rbac_subscriptions):
+    """
+    Returns {subscription_id: set(principal_ids)} of principals that already hold a strong role
+    directly at that subscription's scope. Used to tell whether an app owner already has the
+    subscription access their app would grant them.
+    """
+    result = {}
+    for subscription_id, subscription in (rbac_subscriptions or {}).items():
+        roles_by_id = subscription.get('roles', {})
+        strong_principals = set()
+        for assignment in subscription.get('role_assignments', {}).values():
+            if assignment.get('scope') != f'/subscriptions/{subscription_id}':
+                continue
+            role_id = assignment['role_definition_id'].split('/')[-1]
+            role = roles_by_id.get(role_id)
+            if role and is_subscription_role_strong(role):
+                strong_principals.add(assignment.get('principal_id'))
+        result[subscription_id] = strong_principals
+    return result
+
+
+def compute_app_owner_subscription_escalation(applications, service_principals, rbac_subscriptions):
+    """
+    Flags an App Registration whose service principal holds a strong Azure RBAC role at
+    subscription scope when an owner of the app does NOT already hold a strong role on that same
+    subscription. Such an owner can add credentials to the application, authenticate as its
+    service principal, and thereby gain subscription-level control (Owner/Contributor/etc.) that
+    they do not otherwise have - escalating from (often directory-only) app ownership to control
+    of an Azure subscription. This is the subscription/Azure-RBAC counterpart to the
+    directory/Graph-permission owner check (compute_app_owner_privilege_escalation).
+
+    Must run AFTER compute_enterprise_app_subscription_privilege_table, which populates each
+    service principal's strong_subscription_roles. Mutates each application dict with
+    owner_subscription_escalations (list of {owner, subscription_id, role_name}) and
+    owner_escalates_to_subscription (bool).
+
+    Limitation: owner subscription access is checked via DIRECT role assignments only; an owner
+    who holds the role via a group is not detected here and may be flagged (documented).
+    """
+    try:
+        sp_by_app_id = {
+            sp.get('app_id'): sp for sp in service_principals.values() if sp.get('app_id')
+        }
+        strong_principals_by_sub = _principals_with_strong_subscription_role(rbac_subscriptions)
+
+        for application in applications.values():
+            matching_sp = sp_by_app_id.get(application.get('app_id'))
+            app_strong_sub_roles = matching_sp.get('strong_subscription_roles', []) if matching_sp else []
+
+            escalations = []
+            for owner in application.get('owners', []):
+                owner_id = owner.get('id')
+                owner_label = owner.get('display_name') or owner.get('user_principal_name') or owner_id
+                for role in app_strong_sub_roles:
+                    subscription_id = role.get('subscription_id')
+                    if owner_id not in strong_principals_by_sub.get(subscription_id, set()):
+                        escalations.append({
+                            'owner': owner_label,
+                            'subscription_id': subscription_id,
+                            'role_name': role.get('role_name'),
+                        })
+
+            application['owner_subscription_escalations'] = escalations
+            application['owner_escalates_to_subscription'] = bool(escalations)
+    except Exception as e:
+        print_exception(f'Unable to compute app owner subscription escalation: {e}')

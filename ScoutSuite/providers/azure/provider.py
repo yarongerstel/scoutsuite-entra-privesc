@@ -125,6 +125,12 @@ class AzureProvider(BaseProvider):
                     service_principals=self.services['aad']['service_principals'],
                     rbac_subscriptions=self.services['rbac']['subscriptions'])
                 self.services['aad']['enterprise_apps_with_strong_subscription_roles'] = table
+
+                # Must run after the table above, which populates strong_subscription_roles.
+                entra_privesc.compute_app_owner_subscription_escalation(
+                    applications=self.services['aad']['applications'],
+                    service_principals=self.services['aad']['service_principals'],
+                    rbac_subscriptions=self.services['rbac']['subscriptions'])
         except Exception as e:
             print_exception(f'Unable to compute Entra privilege escalation checks: {e}')
 

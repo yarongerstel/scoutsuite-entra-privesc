@@ -19,6 +19,12 @@
                 "level": "danger"
             }
         ],
+        "aad-app-registration-owner-escalates-to-subscription.json": [
+            {
+                "enabled": true,
+                "level": "danger"
+            }
+        ],
         "aad-enterprise-app-strong-subscription-role.json": [
             {
                 "enabled": true,

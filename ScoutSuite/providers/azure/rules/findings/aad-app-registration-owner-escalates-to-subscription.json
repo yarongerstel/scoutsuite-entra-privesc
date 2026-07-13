@@ -1,0 +1,21 @@
+{
+    "description": "App Registration Owner Can Escalate to Subscription Control via the App",
+    "rationale": "This App Registration's service principal holds a strong Azure RBAC role (Owner, Contributor, User Access Administrator, or a role with broad/wildcard actions) directly at subscription scope, and at least one owner of the application does not already hold a strong role on that subscription. An owner can add a credential (client secret or certificate) to the application and authenticate as its service principal, thereby acquiring that subscription-level role. This lets an owner whose own access is limited (for example, only an Entra directory role and no subscription access) escalate to control of an entire Azure subscription through the app - a distinct escalation path from the app's Microsoft Graph (directory) permissions.",
+    "remediation": "Reduce the service principal's Azure RBAC role to the least privilege it needs, scoped to a resource group or resource rather than the whole subscription where possible. Restrict who can own the application and who can add credentials to it, and ensure owners of subscription-privileged apps are themselves authorized for that subscription access (ideally granted just-in-time via Privileged Identity Management rather than through app ownership).",
+    "references": [
+        "https://learn.microsoft.com/en-us/azure/role-based-access-control/best-practices",
+        "https://learn.microsoft.com/en-us/entra/identity-platform/security-best-practices-for-app-registration",
+        "https://posts.specterops.io/azure-privilege-escalation-via-azure-api-permissions-abuse-74aee1006f48"
+    ],
+    "dashboard_name": "Applications",
+    "path": "aad.applications.id",
+    "conditions": [
+        "and",
+        [
+            "aad.applications.id.owner_escalates_to_subscription",
+            "true",
+            ""
+        ]
+    ],
+    "id_suffix": "owner_escalates_to_subscription"
+}

@@ -148,6 +148,16 @@ admin role). These are ordinary, often less-protected accounts that nonetheless 
 subscription, concentrating blast radius on low-privileged users. Compromising one normal user
 then yields subscription-level control.
 
+### 9. App Registration owner can escalate to subscription control
+`aad-app-registration-owner-escalates-to-subscription` (danger). The subscription/Azure-RBAC
+counterpart to check 1. Flags an App Registration whose service principal holds a strong Azure
+RBAC role at subscription scope when an owner does **not** already hold a strong role on that
+subscription. The owner can add credentials to the app, authenticate as its service principal,
+and gain subscription-level control (e.g. Owner/Contributor) they don't otherwise have - the exact
+"owner has only directory permissions, escalates to a subscription via the app" path. Owner
+subscription access is checked via **direct** role assignments only; an owner who holds the role
+through a group is not detected and may be flagged (documented limitation).
+
 ### 8. Managed Identities with strong subscription roles
 Managed Identities are Service Principals (`servicePrincipalType == 'ManagedIdentity'`) whose
 credentials Azure hands to a compute resource. A Managed Identity holding a strong subscription
