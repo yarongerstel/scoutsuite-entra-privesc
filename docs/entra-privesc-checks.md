@@ -173,8 +173,9 @@ instance metadata endpoint and act with its subscription-level power.
 In addition to what upstream ScoutSuite's Azure AD (`aad`) module already requires
 (`Directory.Read.All` covers the existing `users`/`groups`/`servicePrincipals`/`applications`
 reads), the new calls need read access to owners, app role assignments, and directory roles.
-`Directory.Read.All` alone is sufficient for everything below; narrower alternatives exist if you
-want to scope credentials more tightly:
+`Directory.Read.All` is sufficient for every row below **except the last one** (PIM eligibility -
+see the warning underneath the table); narrower alternatives exist for the rest if you want to
+scope credentials more tightly:
 
 | New Graph call | Minimum permission |
 |---|---|
@@ -184,13 +185,25 @@ want to scope credentials more tightly:
 | `GET /oauth2PermissionGrants?$filter=clientId eq ...` | `DelegatedPermissionGrant.Read.All` (or `Directory.Read.All`) |
 | `GET /directoryRoles` and `.../members` | `RoleManagement.Read.Directory` (or `Directory.Read.All`) |
 | `GET /applications/{id}/federatedIdentityCredentials` | `Application.Read.All` (or `Directory.Read.All`) |
-| `GET /roleManagement/directory/roleEligibilityScheduleInstances` (PIM) | `RoleManagement.Read.Directory` (or `Directory.Read.All`) **and an Entra ID P2 license** |
+| `GET /roleManagement/directory/roleEligibilityScheduleInstances` (PIM) | One of `RoleEligibilitySchedule.Read.Directory`, `RoleEligibilitySchedule.ReadWrite.Directory`, `RoleManagement.ReadWrite.Directory`, `RoleManagement.Read.Directory`, or `RoleManagement.Read.All`. **`Directory.Read.All` does NOT satisfy this call** (confirmed directly from Microsoft Graph's own `PermissionScopeNotGranted` error, which enumerates exactly this list) - it needs one of the RoleManagement/RoleEligibilitySchedule scopes specifically. |
 
-> **PIM eligibility is optional and degrades gracefully.** The last row (PIM-eligible directory
-> roles) requires an Entra ID **P2** license *and* role-management read access. If it returns 403
-> (no P2, or the run identity lacks the permission) the scan logs a single informational line and
-> continues using **active** directory-role assignments only - nothing else is affected. Note that
-> without P2 there are no eligible assignments to read anyway, so active-only is already complete.
+> **PIM eligibility is optional and degrades gracefully.** The PIM row above is the one call in
+> this fork that `Directory.Read.All` does not cover. Two separate things can block it:
+> 1. **Delegated auth (`--cli`/`--user-account`) can't get this scope at all.** Azure CLI's own
+>    first-party app registration has a fixed, Microsoft-defined set of Graph permissions it can
+>    request; if none of the scopes above are in it (as observed - Azure CLI returns
+>    `PermissionScopeNotGranted` for this call), no tenant-side admin consent can add it, because
+>    you can only consent to a scope the client app has declared - and this isn't your app to edit.
+>    The fix is to run with `--service-principal` (app-only, client-credentials) using your own App
+>    Registration that has been granted the Microsoft Graph **Application** permission
+>    `RoleManagement.Read.Directory` (or one of the others above) with admin consent.
+> 2. **Even with the right scope, PIM itself requires an Entra ID P2 license** on the tenant - the
+>    `roleManagement/directory/*` API is a P2 feature. Without P2 there are no eligible assignments
+>    to read anyway, so falling back to active-only assignments is already the complete picture.
+>
+> Either way, if this call fails the scan logs a single informational line (with Graph's actual
+> error message) and continues using **active** directory-role assignments only - nothing else is
+> affected.
 
 As with the rest of ScoutSuite's Azure AD module, these are **read-only** application permissions
 granted to the service principal ScoutSuite authenticates as - running these checks does not
