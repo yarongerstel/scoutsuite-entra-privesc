@@ -646,3 +646,45 @@ def compute_app_owner_subscription_escalation(applications, service_principals, 
             application['owner_escalates_to_subscription'] = bool(escalations)
     except Exception as e:
         print_exception(f'Unable to compute app owner subscription escalation: {e}')
+
+
+def _is_assignable_at_subscription_or_root_scope(role_dict, subscription_id):
+    """
+    True if the role definition's assignable_scopes includes the subscription itself (exact
+    match) or the tenant root ('/'). A custom role assignable only at a narrower resource-group
+    or resource scope cannot, by Azure RBAC scope inheritance, actually grant subscription-wide
+    power no matter how broad its actions are - so it is deliberately excluded here. Management
+    group scopes that happen to include this subscription are not resolved (no MG hierarchy data
+    fetched); a role assignable only at such a scope is a documented gap, not a false positive.
+    """
+    for scope in role_dict.get('assignable_scopes') or []:
+        if scope in ('/', f'/subscriptions/{subscription_id}'):
+            return True
+    return False
+
+
+def compute_high_privilege_custom_roles(rbac_subscriptions):
+    """
+    Flags each Azure RBAC CUSTOM role definition (Microsoft.Authorization/roleDefinitions) that is
+    assignable at subscription (or tenant root) scope AND grants 'strong' (Owner/Contributor/User
+    Access Administrator-equivalent) permissions, using the same is_subscription_role_strong()
+    heuristic used throughout this fork (see subscription_role_strength.json - tune there).
+    Mutates each such role dict with is_high_privilege_custom_role (bool).
+
+    Deliberately reuses ScoutSuite's existing Roles resource/dashboard/HTML partial rather than
+    building a new table: each role object already carries its full permissions AND, once
+    AzureProvider._match_rbac_roles_and_principals() has run, its `assignments` (users/groups/
+    service_principals, resolved to display names in the report) - exactly the "show me who is
+    assigned to this role" the check needs, with no new resource/partial/metadata required.
+    """
+    try:
+        for subscription_id, subscription in (rbac_subscriptions or {}).items():
+            for role in subscription.get('roles', {}).values():
+                is_custom = (role.get('role_type') or '').lower() == 'customrole'
+                role['is_high_privilege_custom_role'] = bool(
+                    is_custom
+                    and _is_assignable_at_subscription_or_root_scope(role, subscription_id)
+                    and is_subscription_role_strong(role)
+                )
+    except Exception as e:
+        print_exception(f'Unable to compute high-privilege custom roles: {e}')

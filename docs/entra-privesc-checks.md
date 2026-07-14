@@ -22,8 +22,15 @@ and are toggled in `rules/rulesets/default.json`.
    (`aad-user-strong-subscription-but-weak-directory`)
 8. **Managed Identity holds a strong role on a subscription**
    (`aad-managed-identity-strong-subscription-role`)
+9. **App Registration owner can escalate to subscription control**
+   (`aad-app-registration-owner-escalates-to-subscription`)
+10. **Standing privilege-escalation-capable subscription role assignment (baseline)**
+    (`aad-standing-privileged-subscription-role-assignment`)
+11. **Custom Azure RBAC role grants high privilege on a subscription**
+    (`rbac-high-privilege-custom-role`) - not Entra/Graph-based like the others, but the same
+    "strong subscription privilege" heuristic; see [below](#11-high-privilege-custom-rbac-roles).
 
-Checks 1-2 are described in detail below; checks 3-8 are summarized in
+Checks 1-2 are described in detail below; checks 3-11 are summarized in
 [Additional checks](#additional-checks).
 
 ## 1. App Registration owner vs. granted permissions
@@ -180,6 +187,25 @@ role is surfaced as a distinct row/finding in the enterprise-app table (via the
 `service_principal_type` column), because the escalation vector differs: whoever controls the
 compute resource's control plane (or runs code on it) can obtain the identity's token from the
 instance metadata endpoint and act with its subscription-level power.
+
+### 11. High-privilege custom RBAC roles
+`rbac-high-privilege-custom-role` (danger). Unlike the other checks, this is Azure RBAC
+(`Microsoft.Authorization/roleDefinitions`), not Microsoft Graph/Entra - no new Graph permission
+needed. Flags every **custom** role definition (`roleType == 'CustomRole'`) that is assignable at
+subscription (or tenant root `/`) scope **and** grants Owner/Contributor/User Access
+Administrator-equivalent permissions, using the same `is_subscription_role_strong()` heuristic as
+the rest of this fork (curated in `data/entra_privesc/subscription_role_strength.json`). A custom
+role assignable only at a narrower resource-group/resource scope is excluded even if its actions
+are broad - Azure RBAC scope inheritance means it can't actually reach the whole subscription.
+
+Custom roles are easy to create ad hoc and often escape the scrutiny given to built-in roles like
+Owner - this surfaces the ones that are just as powerful. This check deliberately does **not**
+introduce a new table/resource/HTML template: it sets `is_high_privilege_custom_role` directly on
+ScoutSuite's existing `Roles` resource objects (`rbac.subscriptions.id.roles.id`), which already
+render on the existing "Roles" dashboard/partial - including an **Assignments** section
+(Users/Groups/Service Principals, resolved to display names, with a count badge) already
+populated by upstream's `AzureProvider._match_rbac_roles_and_principals()`. That Assignments list
+*is* "who/what is assigned to this role" - no new code needed to show it.
 
 ## Required Microsoft Graph permissions
 

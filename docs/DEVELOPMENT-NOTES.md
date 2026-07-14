@@ -6,7 +6,7 @@ Handoff notes for this fork of [ScoutSuite](https://github.com/nccgroup/ScoutSui
 ## What this fork adds
 
 ### Azure / Entra ID privilege-escalation checks
-See [`entra-privesc-checks.md`](entra-privesc-checks.md) for the full write-up. Twelve findings,
+See [`entra-privesc-checks.md`](entra-privesc-checks.md) for the full write-up. Thirteen findings,
 all wired into `providers/azure/rules/rulesets/default.json`:
 
 | Finding file (in `providers/azure/rules/findings/`) | Level |
@@ -19,6 +19,7 @@ all wired into `providers/azure/rules/rulesets/default.json`:
 | `aad-guest-user-strong-role` | danger |
 | `aad-user-strong-subscription-but-weak-directory` | danger |
 | `aad-standing-privileged-subscription-role-assignment` | danger |
+| `rbac-high-privilege-custom-role` (Azure RBAC, not Graph - reuses the existing Roles dashboard/partial, no new table) | danger |
 | `aad-enterprise-app-strong-subscription-role` | warning |
 | `aad-managed-identity-strong-subscription-role` | warning |
 

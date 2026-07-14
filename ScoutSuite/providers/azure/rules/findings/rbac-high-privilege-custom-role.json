@@ -1,0 +1,21 @@
+{
+    "description": "Custom Role Grants High Privilege on the Subscription",
+    "rationale": "This is a CUSTOM role definition (Microsoft.Authorization/roleDefinitions, roleType 'CustomRole') that is assignable at subscription (or tenant root) scope and grants Owner/Contributor/User Access Administrator-equivalent permissions - a wildcard action, a Microsoft.Authorization wildcard, or the ability to write role assignments/definitions. Custom roles are easy to create ad hoc and often escape the scrutiny given to built-in roles like Owner, yet one assignable at subscription scope with broad actions is just as powerful. See the Assignments section on this role (below) for exactly who or what currently holds it.",
+    "remediation": "Review whether this custom role actually needs such broad actions and subscription-wide assignability. Narrow its actions to only what is required, and/or restrict assignable_scopes to a resource group or resource rather than the whole subscription. Review every principal listed under Assignments and remove any that do not need this level of access.",
+    "references": [
+        "https://learn.microsoft.com/en-us/azure/role-based-access-control/custom-roles",
+        "https://learn.microsoft.com/en-us/azure/role-based-access-control/best-practices",
+        "https://learn.microsoft.com/en-us/security/benchmark/azure/mcsb-privileged-access"
+    ],
+    "dashboard_name": "Roles",
+    "path": "rbac.subscriptions.id.roles.id",
+    "conditions": [
+        "and",
+        [
+            "rbac.subscriptions.id.roles.id.is_high_privilege_custom_role",
+            "true",
+            ""
+        ]
+    ],
+    "id_suffix": "high_privilege_custom_role"
+}

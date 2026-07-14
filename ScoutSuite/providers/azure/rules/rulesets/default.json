@@ -382,6 +382,12 @@
                 "level": "danger"
             }
         ],
+        "rbac-high-privilege-custom-role.json": [
+            {
+                "enabled": true,
+                "level": "danger"
+            }
+        ],
         "securitycenter-auto-provisioning-off.json": [
             {
                 "enabled": true,

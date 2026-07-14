@@ -171,6 +171,11 @@ class AzureProvider(BaseProvider):
                 self.services['aad']['standing_privileged_subscription_role_assignments'] = standing_table
                 self.services['aad']['standing_privileged_subscription_role_assignments_count'] = \
                     len(standing_table)
+
+            if 'rbac' in self.service_list:
+                # Only needs rbac (role definitions + assignments), independent of AAD.
+                entra_privesc.compute_high_privilege_custom_roles(
+                    rbac_subscriptions=self.services['rbac']['subscriptions'])
         except Exception as e:
             print_exception(f'Unable to compute Entra privilege escalation checks: {e}')
 
