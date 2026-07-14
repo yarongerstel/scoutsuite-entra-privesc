@@ -71,25 +71,38 @@ Key code:
        path - the regex didn't anticipate). `compute_high_privilege_custom_roles` now only checks
        `role_type == 'CustomRole'` + `is_subscription_role_strong()`/`_role_has_resource_provider_
        wildcard()`; presence in that subscription's `roles` dict already proves reachability.
-  - A separate but analogous over-filtering exists in three functions that check ROLE
-    **ASSIGNMENTS** rather than role definitions - `compute_enterprise_app_subscription_privilege_
-    table`, `compute_standing_privileged_subscription_assignments`, and `_principals_with_strong_
-    subscription_role` all `continue` (skip) any assignment whose `scope` isn't an exact string
-    match for the current subscription. Azure's `role_assignments.list_for_scope()` (also called
-    with no `$filter`) likely returns assignments made at the subscription itself *and* at any
-    ancestor scope (management group/root), the same inheritance behavior as role definitions -
-    which would mean a **standing** role assignment made at an MG (not literally at the
-    subscription) is silently excluded by these three exact-match checks too. This is flagged but
-    **not yet fixed** - fixing it properly needs the row key to also incorporate `subscription_id`
-    to avoid collisions. Confirm with the user before changing this.
-    **Note**: the per-subscription restructuring described below (standing-privileged-assignments
-    grouping) happens to remove that specific collision risk for `compute_standing_privileged_
-    subscription_assignments` alone - its table is now keyed independently within each
-    subscription's own dict, so an MG-inherited assignment recurring across subscriptions would
-    land in separate per-subscription tables rather than colliding on one shared key. The other two
-    functions (`compute_enterprise_app_subscription_privilege_table`,
-    `_principals_with_strong_subscription_role`) still use flat/cross-subscription keying, so the
-    collision risk - and the "confirm before changing" caution - still applies to them.
+  - **A separate but analogous over-filtering existed in three functions that check ROLE
+    ASSIGNMENTS rather than role definitions** - `compute_enterprise_app_subscription_privilege_
+    table`, `_principals_with_strong_subscription_role`, and `compute_standing_privileged_
+    subscription_assignments` all `continue`d (skipped) any assignment whose `scope` wasn't an
+    exact string match for the current subscription. Same root cause as the custom-role fix above:
+    Azure's `role_assignments.list_for_scope()` (also called with no `$filter`) is expected to
+    return assignments made at the subscription itself *and* at any ancestor scope (management
+    group/root) - so a **standing** role assignment made at an MG (not literally at the
+    subscription) was silently excluded by these three exact-match checks too, which would cause
+    real false negatives (an Enterprise App/principal with MG-inherited access invisible to the
+    relevant tables) and a real false positive (`aad-app-registration-owner-escalates-to-
+    subscription` claiming an owner would gain *new* access via the app, when they already hold
+    equivalent access through the MG).
+
+    **Fixed in all three** by removing the scope-string check, the same way as the custom-role
+    case. Checked each for the collision risk this required care around in the custom-role case:
+    - `compute_enterprise_app_subscription_privilege_table`'s row key already includes
+      `subscription_id` (`f"{service_principal_id}::{subscription_id}::{role_id}"`) - safe as-is,
+      no restructuring needed.
+    - `_principals_with_strong_subscription_role`'s result is already bucketed per subscription
+      (`{subscription_id: set(principal_ids)}`) - safe as-is.
+    - `compute_standing_privileged_subscription_assignments` prefers the bare Azure assignment id
+      as its row key, which is exactly what made the *old* flat cross-subscription table
+      collision-prone - but it had already been restructured (see below) to build a fresh `table`
+      per subscription, so the same assignment id recurring across several subscriptions lands in
+      separate per-subscription dicts, not one shared one. Safe once that restructuring landed.
+
+    Verified each: a synthetic assignment scoped only to a Management Group is now correctly
+    picked up by all three, an Enterprise App's real MG-inherited role appears in its table, an
+    owner who already holds MG-inherited access no longer trips the escalation finding, and the
+    same MG-shared assignment id resolved into three different subscriptions produces three
+    separate rows (one per subscription), not a collision.
   - **Standing-privileged-assignments was originally a flat, cross-subscription table** under
     `aad.standing_privileged_subscription_role_assignments.id`. The user reported this as
     confusing in practice: the same principal holding a standing role on several subscriptions
