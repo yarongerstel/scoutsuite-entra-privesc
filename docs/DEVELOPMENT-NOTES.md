@@ -108,6 +108,28 @@ Key code:
     the Roles partial) were all updated to match. Verified end-to-end: the real ProcessingEngine
     fires one finding item per subscription (not collapsed into one), and the real Handlebars/
     helpers.js render each subscription's assignments as a separate, clearly-labelled group.
+  - **The Applications/Service Principals drill-downs never rendered any of the fields this fork's
+    checks compute.** `services.aad.applications.html` and `services.aad.service_principals.html`
+    are unmodified upstream templates - they show basic object metadata (and, for SPs, Keys/
+    Roles) but never `granted_permissions`, `owners_directory_roles`,
+    `owner_weaker_than_app_permissions`, `federated_identity_credentials`/
+    `broad_federated_credentials`, `dangerous_permission_combinations`,
+    `owner_subscription_escalations`, or `strong_subscription_roles` - so a flagged app/SP showed
+    the "danger" badge with no visible evidence of *why*. Added sections to both partials: Owners
+    (with each owner's directory roles + tier, and a callout when `owner_weaker_than_app_
+    permissions`), Granted Microsoft Graph Permissions (+ risk tier), Federated Identity
+    Credentials (Applications only - every credential listed with issuer/subject and an "Overly
+    Broad"/"Scoped" indicator per entry, not just the ones already flagged broad), Dangerous
+    Permission Combinations (shown only `{{#if has_dangerous_permission_combination}}`), Owner Can
+    Escalate to Subscription Control (Applications only, shown only `{{#if owner_escalates_to_
+    subscription}}`), and Strong Subscription Roles (Service Principals only, shown only `{{#if
+    has_strong_subscription_role}}`). `compute_broad_federated_credentials` now also sets `is_broad`
+    directly on each entry of `federated_identity_credentials` (not just the separate
+    `broad_federated_credentials` summary list), so the per-credential badge doesn't need to
+    cross-reference two lists in Handlebars. Verified by rendering both partials through the real
+    Handlebars/helpers.js with data exercising every conditional branch (weak owner, broad FIC,
+    dangerous combo present/absent, subscription escalation, strong SP role) - all sections render
+    with correct content and the conditional ones correctly appear/disappear.
 
 ### Azure network segregation checks
 See [`network-segregation-checks.md`](network-segregation-checks.md) for the full write-up. Two

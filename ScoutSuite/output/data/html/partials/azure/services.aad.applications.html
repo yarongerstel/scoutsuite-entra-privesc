@@ -20,6 +20,98 @@
         <div class="list-group-item-text item-margin">Deletion Timestamp: <span id="aad.applications.{{@key}}.deletion_timestamp"><samp>{{value_or_none deletion_timestamp}}</samp></span></div>
     </div>
     <div class="list-group-item">
+        <h4 class="list-group-item-heading">Owners
+            {{> count_badge count=owners_directory_roles.length}}
+        </h4>
+        <div class="accordion-inner">
+            {{#if owner_weaker_than_app_permissions}}
+            <p class="list-group-item-text"><strong>This app's owner(s) hold a weaker Entra directory role than the Microsoft Graph permissions granted to this application - see "Granted Microsoft Graph Permissions" below.</strong></p>
+            {{/if}}
+            <ul>
+                {{#each owners_directory_roles}}
+                <li class="list-group-item-text">
+                    <samp>{{value_or_none this.display_name}}</samp> - Directory Role Tier <samp>{{this.directory_role_tier}}</samp>
+                    {{#if this.directory_roles.length}}
+                    : <samp>{{jsonToString this.directory_roles}}</samp>
+                    {{else}}
+                    (no directory role)
+                    {{/if}}
+                </li>
+                {{else}}
+                <li class="list-group-item-text">No owners.</li>
+                {{/each}}
+            </ul>
+        </div>
+    </div>
+    <div class="list-group-item">
+        <h4 class="list-group-item-heading">Granted Microsoft Graph Permissions
+            {{> count_badge count=granted_permissions.length}}
+        </h4>
+        <div class="accordion-inner">
+            <div class="list-group-item-text item-margin">Highest Risk Tier: <samp>{{value_or_none granted_permissions_risk_tier}}</samp></div>
+            <ul>
+                {{#each granted_permissions}}
+                <li class="list-group-item-text"><samp>{{this}}</samp></li>
+                {{/each}}
+            </ul>
+        </div>
+    </div>
+    <div class="list-group-item">
+        <h4 class="list-group-item-heading">Federated Identity Credentials
+            {{> count_badge count=federated_identity_credentials.length}}
+        </h4>
+        <div class="accordion-inner">
+            <ul>
+                {{#each federated_identity_credentials}}
+                <li class="list-group-item-text">
+                    <samp>{{value_or_none this.name}}</samp> -
+                    {{#if this.is_broad}}<strong>Overly Broad</strong>{{else}}Scoped{{/if}}
+                </li>
+                <ul>
+                    <li class="list-group-item-text">Issuer: <samp>{{value_or_none this.issuer}}</samp></li>
+                    <li class="list-group-item-text">Subject: <samp>{{value_or_none this.subject}}</samp></li>
+                    {{#if this.claims_matching_expression}}
+                    <li class="list-group-item-text">Claims Matching Expression: <samp>{{value_or_none this.claims_matching_expression}}</samp></li>
+                    {{/if}}
+                </ul>
+                {{else}}
+                <li class="list-group-item-text">No federated identity credentials.</li>
+                {{/each}}
+            </ul>
+        </div>
+    </div>
+    {{#if has_dangerous_permission_combination}}
+    <div class="list-group-item">
+        <h4 class="list-group-item-heading">Dangerous Permission Combinations
+            {{> count_badge count=dangerous_permission_combinations.length}}
+        </h4>
+        <div class="accordion-inner">
+            <ul>
+                {{#each dangerous_permission_combinations}}
+                <li class="list-group-item-text"><samp>{{value_or_none this.name}}</samp></li>
+                <ul>
+                    <li class="list-group-item-text">{{value_or_none this.rationale}}</li>
+                </ul>
+                {{/each}}
+            </ul>
+        </div>
+    </div>
+    {{/if}}
+    {{#if owner_escalates_to_subscription}}
+    <div class="list-group-item">
+        <h4 class="list-group-item-heading">Owner Can Escalate to Subscription Control
+            {{> count_badge count=owner_subscription_escalations.length}}
+        </h4>
+        <div class="accordion-inner">
+            <ul>
+                {{#each owner_subscription_escalations}}
+                <li class="list-group-item-text"><samp>{{value_or_none this.owner}}</samp> would gain <samp>{{value_or_none this.role_name}}</samp> on subscription <samp>{{getValueAt 'services.rbac.subscriptions' this.subscription_id 'display_name'}} ({{value_or_none this.subscription_id}})</samp></li>
+                {{/each}}
+            </ul>
+        </div>
+    </div>
+    {{/if}}
+    <div class="list-group-item">
         <h4 class="list-group-item-heading">Password Credentials
             {{> count_badge count=password_credentials.length}}
         </h4>

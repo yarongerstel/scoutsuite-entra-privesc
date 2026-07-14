@@ -348,15 +348,18 @@ def compute_broad_federated_credentials(applications):
     """
     Flags any App Registration that has an overly-broad federated identity credential. Mutates
     each application dict with broad_federated_credentials (list) and
-    has_broad_federated_credential (bool).
+    has_broad_federated_credential (bool). Also sets is_broad (bool) directly on each entry of
+    the application's own federated_identity_credentials list, so the HTML report can render
+    every credential with a broad/safe indicator without cross-referencing the two lists.
     """
     try:
         for application in applications.values():
-            broad = [
-                {'name': fic.get('name'), 'issuer': fic.get('issuer'), 'subject': fic.get('subject')}
-                for fic in application.get('federated_identity_credentials', [])
-                if is_federated_credential_broad(fic)
-            ]
+            broad = []
+            for fic in application.get('federated_identity_credentials', []):
+                fic['is_broad'] = is_federated_credential_broad(fic)
+                if fic['is_broad']:
+                    broad.append({'name': fic.get('name'), 'issuer': fic.get('issuer'),
+                                   'subject': fic.get('subject')})
             application['broad_federated_credentials'] = broad
             application['has_broad_federated_credential'] = bool(broad)
     except Exception as e:
