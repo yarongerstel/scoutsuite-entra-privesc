@@ -124,6 +124,25 @@ def get_graph_permission_info(app_role_id):
     return _GRAPH_PERMISSION_ID_TO_INFO.get(app_role_id.lower())
 
 
+def _role_action_strings(role_dict):
+    """
+    Yields every action string (lowercased) across all of a role's permission blocks, defensively.
+    A role's `permissions` may be a list of SDK objects (with a `.actions` attribute) or of plain
+    dicts (with an 'actions' key); and any of `permissions`, an individual permission, or its
+    `actions` may be None. Coercing all of those to empty avoids a `for action in None` TypeError
+    that would otherwise propagate out of is_subscription_role_strong / is_role_granting_
+    subscription_role / _role_has_resource_provider_wildcard and abort whichever compute_* function
+    called them (silently emptying its finding) - the same failure class that once emptied the
+    Enterprise Apps table.
+    """
+    for permission in role_dict.get('permissions') or []:
+        if permission is None:
+            continue
+        actions = permission.actions if hasattr(permission, 'actions') else permission.get('actions')
+        for action in actions or []:
+            yield (action or '').lower()
+
+
 def is_subscription_role_strong(role_dict):
     """
     A subscription-scope RBAC role is 'strong' if it's a well-known high-privilege built-in
@@ -136,11 +155,9 @@ def is_subscription_role_strong(role_dict):
         return True
     if role_dict.get('custom_subscription_owner_role'):
         return True
-    for permission in role_dict.get('permissions') or []:
-        for action in permission.actions if hasattr(permission, 'actions') else permission.get('actions', []):
-            action_lower = (action or '').lower()
-            if action_lower in _STRONG_ACTION_PATTERNS:
-                return True
+    for action_lower in _role_action_strings(role_dict):
+        if action_lower in _STRONG_ACTION_PATTERNS:
+            return True
     return False
 
 
@@ -157,10 +174,9 @@ def is_role_granting_subscription_role(role_dict):
         return True
     if role_dict.get('custom_subscription_owner_role'):
         return True
-    for permission in role_dict.get('permissions') or []:
-        for action in permission.actions if hasattr(permission, 'actions') else permission.get('actions', []):
-            if (action or '').lower() in _ROLE_GRANTING_ACTION_PATTERNS:
-                return True
+    for action_lower in _role_action_strings(role_dict):
+        if action_lower in _ROLE_GRANTING_ACTION_PATTERNS:
+            return True
     return False
 
 
@@ -746,11 +762,9 @@ _RESOURCE_PROVIDER_WILDCARD_RE = re.compile(r'^[^/*]+/\*$')
 
 def _role_has_resource_provider_wildcard(role_dict):
     """True if any of the role's actions is a single resource-provider wildcard ('<namespace>/*')."""
-    for permission in role_dict.get('permissions') or []:
-        actions = permission.actions if hasattr(permission, 'actions') else permission.get('actions', [])
-        for action in actions or []:
-            if _RESOURCE_PROVIDER_WILDCARD_RE.match((action or '').lower()):
-                return True
+    for action_lower in _role_action_strings(role_dict):
+        if _RESOURCE_PROVIDER_WILDCARD_RE.match(action_lower):
+            return True
     return False
 
 
@@ -793,12 +807,16 @@ def compute_high_privilege_custom_roles(rbac_subscriptions):
     try:
         for subscription_id, subscription in (rbac_subscriptions or {}).items():
             for role in subscription.get('roles', {}).values():
-                is_custom = (role.get('role_type') or '').lower() == 'customrole'
-                is_high_privilege = bool(is_custom and is_subscription_role_strong(role))
-                role['is_high_privilege_custom_role'] = is_high_privilege
-                role['is_resource_provider_wildcard_custom_role'] = bool(
-                    is_custom and not is_high_privilege
-                    and _role_has_resource_provider_wildcard(role)
-                )
+                try:
+                    is_custom = (role.get('role_type') or '').lower() == 'customrole'
+                    is_high_privilege = bool(is_custom and is_subscription_role_strong(role))
+                    role['is_high_privilege_custom_role'] = is_high_privilege
+                    role['is_resource_provider_wildcard_custom_role'] = bool(
+                        is_custom and not is_high_privilege
+                        and _role_has_resource_provider_wildcard(role)
+                    )
+                except Exception as e:
+                    print_exception(f'Skipping a role while computing high-privilege custom '
+                                    f'roles: {e}')
     except Exception as e:
         print_exception(f'Unable to compute high-privilege custom roles: {e}')

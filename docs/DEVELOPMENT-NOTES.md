@@ -105,6 +105,20 @@ Key code:
     functions; RG/resource-descendant assignments are excluded; a malformed descendant assignment
     is skipped without emptying the table; and the original `principalType:'Unknown'` UAA-at-
     subscription case still fires.
+  - **Hardened the role-permission readers against the same silent-empty failure class.**
+    `is_subscription_role_strong`, `is_role_granting_subscription_role`, and
+    `_role_has_resource_provider_wildcard` iterated `permission.actions` (SDK object) /
+    `permission.get('actions', [])` (dict) directly, which raises `TypeError: 'NoneType' object is
+    not iterable` if a role has `actions: None`, a `None` permission block, or (for the dict form)
+    an `actions` key present-but-None (`.get(k, [])` only defaults on a *missing* key). A single
+    such role would abort `compute_high_privilege_custom_roles` (which had no per-role guard),
+    silently emptying BOTH custom-role findings - the exact failure that had emptied the Enterprise
+    Apps table. Fixed at the source with a shared `_role_action_strings(role_dict)` generator that
+    coerces every level (`permissions`, each permission, its `actions`) to empty when None, so all
+    three readers - and therefore every compute_* that calls them - are safe. Also added a per-role
+    `try/except` in `compute_high_privilege_custom_roles`. Verified against roles with
+    `actions:None`, a `None` permission, no `permissions` key, and an SDK-style object with
+    `.actions=None`: none raise, and a good/RP-wildcard role alongside them is still flagged.
   - **Standing-privileged-assignments was originally a flat, cross-subscription table** under
     `aad.standing_privileged_subscription_role_assignments.id`. The user reported this as
     confusing in practice: the same principal holding a standing role on several subscriptions
