@@ -30,10 +30,19 @@ Key code:
 - Correlation: `providers/azure/entra_privesc.py` (all cross-resource logic), invoked from
   `AzureProvider.preprocessing()` → `_compute_entra_privesc_checks()` in `providers/azure/provider.py`.
 - Curated data (heuristics, tune these): `providers/azure/data/entra_privesc/*.json`.
-- Known real bugs fixed along the way (worth knowing about if debugging odd results): Azure ARM's
-  role-assignment API can report `principalType: 'Unknown'` for a genuine Service Principal - match
-  by principal ID against fetched objects instead of trusting that field (see
-  `compute_enterprise_app_subscription_privilege_table` / `compute_standing_privileged_subscription_assignments`).
+- Known real bugs fixed along the way (worth knowing about if debugging odd results):
+  - Azure ARM's role-assignment API can report `principalType: 'Unknown'` for a genuine Service
+    Principal - match by principal ID against fetched objects instead of trusting that field (see
+    `compute_enterprise_app_subscription_privilege_table` / `compute_standing_privileged_subscription_assignments`).
+  - `rbac-high-privilege-custom-role`'s scope check originally required an EXACT string match
+    against the current `subscription_id` (`scope == f'/subscriptions/{subscription_id}'`), which
+    silently missed real custom roles - a role's `assignable_scopes` doesn't need to byte-for-byte
+    match how `subscription_id` is captured elsewhere. Fixed with a regex
+    (`_SUBSCRIPTION_SCOPE_RE`) that matches "is this scope A subscription" (any subscription, not
+    a specific one) while still correctly excluding resource-group/resource-scoped roles - a plain
+    substring check (`"subscriptions" in scope`, mirroring the older upstream
+    `_no_custom_subscription_owner_role_allowed()`) is NOT precise enough for this, since every
+    ARM resource ID contains that substring including resource-group-scoped ones.
 
 ### Azure network segregation checks
 See [`network-segregation-checks.md`](network-segregation-checks.md) for the full write-up. Two

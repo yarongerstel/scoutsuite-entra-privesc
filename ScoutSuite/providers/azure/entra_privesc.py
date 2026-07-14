@@ -38,6 +38,7 @@ IMPORTANT / LIMITATIONS (see docs/entra-privesc-checks.md for the full write-up)
 
 import json
 import os
+import re
 
 from ScoutSuite.core.console import print_exception
 
@@ -648,17 +649,37 @@ def compute_app_owner_subscription_escalation(applications, service_principals, 
         print_exception(f'Unable to compute app owner subscription escalation: {e}')
 
 
-def _is_assignable_at_subscription_or_root_scope(role_dict, subscription_id):
+# Matches exactly '/subscriptions/{anything-with-no-further-slash}', optionally with a trailing
+# slash - i.e. the scope IS a subscription (not a resource group/resource beneath one). Every
+# Azure ARM resource ID contains the substring 'subscriptions', so a plain substring check would
+# wrongly treat a resource-group-scoped role as subscription-scoped too; this regex requires the
+# path to end right after the subscription ID segment.
+_SUBSCRIPTION_SCOPE_RE = re.compile(r'^/subscriptions/[^/]+/?$', re.IGNORECASE)
+
+
+def _is_assignable_at_subscription_or_root_scope(role_dict):
     """
-    True if the role definition's assignable_scopes includes the subscription itself (exact
-    match) or the tenant root ('/'). A custom role assignable only at a narrower resource-group
-    or resource scope cannot, by Azure RBAC scope inheritance, actually grant subscription-wide
-    power no matter how broad its actions are - so it is deliberately excluded here. Management
-    group scopes that happen to include this subscription are not resolved (no MG hierarchy data
-    fetched); a role assignable only at such a scope is a documented gap, not a false positive.
+    True if the role definition's assignable_scopes includes a subscription-level scope (any
+    subscription, not necessarily the one currently being processed - a custom role's
+    assignable_scopes can list several) or the tenant root ('/'). A custom role assignable only
+    at a narrower resource-group or resource scope cannot, by Azure RBAC scope inheritance,
+    actually grant subscription-wide power no matter how broad its actions are - so it is
+    deliberately excluded here.
+
+    Does NOT require matching a specific subscription_id: an earlier version of this check did an
+    exact string match against the current subscription_id, which turned out to be too strict and
+    silently missed real custom roles with e.g. `"assignableScopes": ["/subscriptions/<id>"]` and
+    `"actions": ["*"]`. Matching "is this scope A subscription" rather than "is this scope THIS
+    subscription" is both simpler and correct for the question being asked here ("is this custom
+    role high-privilege at subscription scope at all").
+
+    Management group scopes that happen to include this subscription are not resolved (no MG
+    hierarchy data fetched); a role assignable only at such a scope is a documented gap.
     """
     for scope in role_dict.get('assignable_scopes') or []:
-        if scope in ('/', f'/subscriptions/{subscription_id}'):
+        if not scope:
+            continue
+        if scope == '/' or _SUBSCRIPTION_SCOPE_RE.match(scope):
             return True
     return False
 
@@ -683,7 +704,7 @@ def compute_high_privilege_custom_roles(rbac_subscriptions):
                 is_custom = (role.get('role_type') or '').lower() == 'customrole'
                 role['is_high_privilege_custom_role'] = bool(
                     is_custom
-                    and _is_assignable_at_subscription_or_root_scope(role, subscription_id)
+                    and _is_assignable_at_subscription_or_root_scope(role)
                     and is_subscription_role_strong(role)
                 )
     except Exception as e:
