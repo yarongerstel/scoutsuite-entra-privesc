@@ -35,15 +35,47 @@ Key code:
   - Azure ARM's role-assignment API can report `principalType: 'Unknown'` for a genuine Service
     Principal - match by principal ID against fetched objects instead of trusting that field (see
     `compute_enterprise_app_subscription_privilege_table` / `compute_standing_privileged_subscription_assignments`).
-  - `rbac-high-privilege-custom-role`'s scope check originally required an EXACT string match
-    against the current `subscription_id` (`scope == f'/subscriptions/{subscription_id}'`), which
-    silently missed real custom roles - a role's `assignable_scopes` doesn't need to byte-for-byte
-    match how `subscription_id` is captured elsewhere. Fixed with a regex
-    (`_SUBSCRIPTION_SCOPE_RE`) that matches "is this scope A subscription" (any subscription, not
-    a specific one) while still correctly excluding resource-group/resource-scoped roles - a plain
-    substring check (`"subscriptions" in scope`, mirroring the older upstream
-    `_no_custom_subscription_owner_role_allowed()`) is NOT precise enough for this, since every
-    ARM resource ID contains that substring including resource-group-scoped ones.
+  - `rbac-high-privilege-custom-role`'s scope check went through two iterations before landing on
+    the current (correct) approach:
+    1. An exact string match against the current `subscription_id`
+       (`scope == f'/subscriptions/{subscription_id}'`) - too strict, silently missed real custom
+       roles whose `assignable_scopes` didn't byte-for-byte match how `subscription_id` is
+       captured elsewhere.
+    2. A regex (`_SUBSCRIPTION_SCOPE_RE`) matching "is this scope *a* subscription" (any
+       subscription, or tenant root `/`) - better, but still missed real custom roles delegated
+       via a **Management Group** scope (e.g.
+       `"assignableScopes": ["/providers/Microsoft.Management/managementGroups/<mg>"]`), a common
+       Landing-Zone/delegated-governance pattern. A real customer role with `actions: ["*"]`
+       scoped only at an MG was reported by the user as a false negative (0 results across all
+       three custom-role findings, incl. upstream's own `rbac-custom-subscription-owner-role-not-
+       allowed`, which has the identical blind spot via its `"subscriptions" in assignable_scope`
+       substring check).
+    3. **Fixed by removing the scope-string check entirely.** Roles are fetched per subscription
+       via `role_definitions.list(scope=f'/subscriptions/{subscription_id}')`, and Azure's own API
+       only returns a role there if it's assignable at that subscription OR at any ancestor scope
+       (parent/grandparent management group, or tenant root) - i.e. Azure has *already* resolved
+       scope inheritance by the time a role shows up under a subscription's `roles` dict. Trying to
+       re-derive "is this scope a subscription" from the raw `assignable_scopes` strings was both
+       redundant (when correct) and incomplete (whenever Azure returns a scope shape - like an MG
+       path - the regex didn't anticipate). `compute_high_privilege_custom_roles` now only checks
+       `role_type == 'CustomRole'` + `is_subscription_role_strong()`/`_role_has_resource_provider_
+       wildcard()`; presence in that subscription's `roles` dict already proves reachability.
+  - A separate but analogous over-filtering exists in three functions that check ROLE
+    **ASSIGNMENTS** rather than role definitions - `compute_enterprise_app_subscription_privilege_
+    table`, `compute_standing_privileged_subscription_assignments`, and `_principals_with_strong_
+    subscription_role` all `continue` (skip) any assignment whose `scope` isn't an exact string
+    match for the current subscription. Azure's `role_assignments.list_for_scope()` (also called
+    with no `$filter`) likely returns assignments made at the subscription itself *and* at any
+    ancestor scope (management group/root), the same inheritance behavior as role definitions -
+    which would mean a **standing** role assignment made at an MG (not literally at the
+    subscription) is silently excluded by these three exact-match checks too. This is flagged but
+    **not yet fixed** - unlike the role-definition case, naively dropping the scope filter here
+    would collapse an MG-inherited assignment into a single table row (since the same assignment
+    `id` recurs identically across every subscription under that MG, and the table dict is keyed
+    by that `id`), losing the "which subscriptions does this reach" information; fixing it
+    properly needs the row key to also incorporate `subscription_id`. Confirm with the user before
+    changing this - it touches three functions and the correct fix needs more care than the
+    role-definition case did.
 
 ### Azure network segregation checks
 See [`network-segregation-checks.md`](network-segregation-checks.md) for the full write-up. Two

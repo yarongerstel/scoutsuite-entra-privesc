@@ -649,13 +649,6 @@ def compute_app_owner_subscription_escalation(applications, service_principals, 
         print_exception(f'Unable to compute app owner subscription escalation: {e}')
 
 
-# Matches exactly '/subscriptions/{anything-with-no-further-slash}', optionally with a trailing
-# slash - i.e. the scope IS a subscription (not a resource group/resource beneath one). Every
-# Azure ARM resource ID contains the substring 'subscriptions', so a plain substring check would
-# wrongly treat a resource-group-scoped role as subscription-scoped too; this regex requires the
-# path to end right after the subscription ID segment.
-_SUBSCRIPTION_SCOPE_RE = re.compile(r'^/subscriptions/[^/]+/?$', re.IGNORECASE)
-
 # A resource-provider-wide wildcard action such as 'Microsoft.Compute/*' or 'Microsoft.Storage/*'
 # grants full control over one entire Azure resource provider (create/read/update/delete every
 # resource of that provider across the whole subscription). That is broad standing power, though
@@ -677,37 +670,10 @@ def _role_has_resource_provider_wildcard(role_dict):
     return False
 
 
-def _is_assignable_at_subscription_or_root_scope(role_dict):
-    """
-    True if the role definition's assignable_scopes includes a subscription-level scope (any
-    subscription, not necessarily the one currently being processed - a custom role's
-    assignable_scopes can list several) or the tenant root ('/'). A custom role assignable only
-    at a narrower resource-group or resource scope cannot, by Azure RBAC scope inheritance,
-    actually grant subscription-wide power no matter how broad its actions are - so it is
-    deliberately excluded here.
-
-    Does NOT require matching a specific subscription_id: an earlier version of this check did an
-    exact string match against the current subscription_id, which turned out to be too strict and
-    silently missed real custom roles with e.g. `"assignableScopes": ["/subscriptions/<id>"]` and
-    `"actions": ["*"]`. Matching "is this scope A subscription" rather than "is this scope THIS
-    subscription" is both simpler and correct for the question being asked here ("is this custom
-    role high-privilege at subscription scope at all").
-
-    Management group scopes that happen to include this subscription are not resolved (no MG
-    hierarchy data fetched); a role assignable only at such a scope is a documented gap.
-    """
-    for scope in role_dict.get('assignable_scopes') or []:
-        if not scope:
-            continue
-        if scope == '/' or _SUBSCRIPTION_SCOPE_RE.match(scope):
-            return True
-    return False
-
-
 def compute_high_privilege_custom_roles(rbac_subscriptions):
     """
-    Flags each Azure RBAC CUSTOM role definition (Microsoft.Authorization/roleDefinitions) that is
-    assignable at subscription (or tenant root) scope, in two severity tiers:
+    Flags each Azure RBAC CUSTOM role definition (Microsoft.Authorization/roleDefinitions) that
+    reaches subscription scope, in two severity tiers:
 
      - is_high_privilege_custom_role (danger): grants 'strong' (Owner/Contributor/User Access
        Administrator-equivalent) permissions - a full '*' wildcard, a Microsoft.Authorization
@@ -725,17 +691,29 @@ def compute_high_privilege_custom_roles(rbac_subscriptions):
     AzureProvider._match_rbac_roles_and_principals() has run, its `assignments` (users/groups/
     service_principals, resolved to display names in the report) - exactly the "show me who is
     assigned to this role" the check needs, with no new resource/partial/metadata required.
+
+    No separate 'is this scope a subscription' check is done on `assignable_scopes` here (an
+    earlier version tried to pattern-match it, which missed real roles assignable only via a
+    Management Group scope, e.g. `"assignableScopes":
+    ["/providers/Microsoft.Management/managementGroups/<mg>"]` - a common Landing-Zone/delegated-
+    governance pattern). That check was both redundant and incomplete: roles are fetched per
+    subscription via `role_definitions.list(scope=f'/subscriptions/{subscription_id}')`, and Azure
+    itself only returns a role there if it is assignable AT that subscription OR at any ancestor
+    scope (a parent/grandparent management group, or the tenant root) - i.e. Azure has already
+    resolved scope inheritance for us by the time a role shows up under a given subscription's
+    `roles` dict. Re-deriving "is this scope a subscription" from the raw `assignable_scopes`
+    strings can only miss cases (like Management Group paths) that weren't anticipated; simply
+    trusting that presence in `subscription['roles']` already means "reaches this subscription" is
+    both simpler and strictly more correct.
     """
     try:
         for subscription_id, subscription in (rbac_subscriptions or {}).items():
             for role in subscription.get('roles', {}).values():
                 is_custom = (role.get('role_type') or '').lower() == 'customrole'
-                assignable = _is_assignable_at_subscription_or_root_scope(role)
-                is_high_privilege = bool(
-                    is_custom and assignable and is_subscription_role_strong(role))
+                is_high_privilege = bool(is_custom and is_subscription_role_strong(role))
                 role['is_high_privilege_custom_role'] = is_high_privilege
                 role['is_resource_provider_wildcard_custom_role'] = bool(
-                    is_custom and assignable and not is_high_privilege
+                    is_custom and not is_high_privilege
                     and _role_has_resource_provider_wildcard(role)
                 )
     except Exception as e:

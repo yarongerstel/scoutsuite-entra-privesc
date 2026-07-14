@@ -62,15 +62,36 @@ checks too:
    `AzureProvider._match_rbac_roles_and_principals()` already used (it never checks
    `principal_type` at all, for exactly this reason). Found via the user cross-checking against
    Prowler, which caught an SP ScoutSuite had missed.
-2. **An exact-string scope match is too strict for custom role `assignable_scopes`.** The
-   high-privilege-custom-role check originally required
-   `scope == f'/subscriptions/{subscription_id}'` exactly, which silently missed real custom
-   roles with `actions: ["*"]` at subscription scope. Fixed with a regex
-   (`^/subscriptions/[^/]+/?$`) that recognizes "is this scope *a* subscription" rather than "is
-   this scope *this specific* subscription" - while still correctly excluding
-   resource-group-scoped roles (a plain substring check, which is what the *older* pre-existing
-   upstream `_no_custom_subscription_owner_role_allowed()` uses, is NOT precise enough for this,
-   since every ARM resource ID contains the substring "subscriptions").
+2. **Pattern-matching a custom role's `assignable_scopes` string is inherently incomplete - fixed
+   by not doing it at all.** Two iterations: (a) an exact-string match
+   (`scope == f'/subscriptions/{subscription_id}'`) silently missed real custom roles at
+   subscription scope with non-matching casing/format; (b) a regex
+   (`^/subscriptions/[^/]+/?$`, "is this scope *a* subscription") fixed that, but still missed a
+   real user-reported role delegated purely via a **Management Group** scope
+   (`"assignableScopes": ["/providers/Microsoft.Management/managementGroups/<mg>"]` - a common
+   Landing-Zone/delegated-governance pattern), reported as a false negative (0 results across all
+   three custom-role findings, including upstream's own pre-existing
+   `rbac-custom-subscription-owner-role-not-allowed`, which has the identical blind spot via its
+   `"subscriptions" in assignable_scope` substring check - not fixed, since it's unmodified
+   upstream code, but documented). **Root fix:** removed the scope-string check entirely. Roles
+   are fetched per subscription via
+   `role_definitions.list(scope=f'/subscriptions/{subscription_id}')`, and Azure's own API only
+   returns a role there if it's assignable at that subscription *or any ancestor scope* - Azure has
+   already resolved scope inheritance by the time a role shows up under a subscription's `roles`
+   dict, so re-deriving "is this scope a subscription" from the raw strings was both redundant and
+   incomplete (it can only miss scope shapes it didn't anticipate, like MG paths).
+   `compute_high_privilege_custom_roles` now only checks `role_type == 'CustomRole'` +
+   `is_subscription_role_strong()` / `_role_has_resource_provider_wildcard()`.
+   **Related, NOT yet fixed:** three functions that check role *assignments* rather than role
+   *definitions* (`compute_enterprise_app_subscription_privilege_table`,
+   `compute_standing_privileged_subscription_assignments`, `_principals_with_strong_subscription_
+   role`) have the same exact-scope-match pattern on `assignment.get('scope')`, which likely has
+   the identical Management-Group blind spot for **standing role assignments** made at an MG rather
+   than literally at the subscription. Not fixed yet because naively dropping that filter would
+   collapse an MG-inherited assignment into a single table row (it recurs with the same assignment
+   `id` under every subscription in that MG, and the table is keyed by `id`) - needs the row key to
+   also incorporate `subscription_id`. Ask the user before touching this - it's a bigger, three-
+   function change.
 3. **Custom "flat table" findings render as a BLANK page without three specific things**: (a) the
    metadata.json `cols` value is a RENDER MODE (0/1/2 only - `loadConfig()` in the report's JS has
    no branch for `cols >= 3`, so setting `cols: 4` silently renders nothing), not a column count;

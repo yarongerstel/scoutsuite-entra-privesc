@@ -194,12 +194,25 @@ instance metadata endpoint and act with its subscription-level power.
 ### 11. High-privilege custom RBAC roles
 `rbac-high-privilege-custom-role` (danger). Unlike the other checks, this is Azure RBAC
 (`Microsoft.Authorization/roleDefinitions`), not Microsoft Graph/Entra - no new Graph permission
-needed. Flags every **custom** role definition (`roleType == 'CustomRole'`) that is assignable at
-subscription (or tenant root `/`) scope **and** grants Owner/Contributor/User Access
-Administrator-equivalent permissions, using the same `is_subscription_role_strong()` heuristic as
-the rest of this fork (curated in `data/entra_privesc/subscription_role_strength.json`). A custom
-role assignable only at a narrower resource-group/resource scope is excluded even if its actions
-are broad - Azure RBAC scope inheritance means it can't actually reach the whole subscription.
+needed. Flags every **custom** role definition (`roleType == 'CustomRole'`) that reaches
+subscription scope **and** grants Owner/Contributor/User Access Administrator-equivalent
+permissions, using the same `is_subscription_role_strong()` heuristic as the rest of this fork
+(curated in `data/entra_privesc/subscription_role_strength.json`).
+
+"Reaches subscription scope" is determined implicitly, not by pattern-matching the role's
+`assignable_scopes` strings: roles are fetched per subscription via
+`role_definitions.list(scope=f'/subscriptions/{subscription_id}')`, and Azure's own API only
+returns a role there if it's assignable at that subscription **or at any ancestor scope**
+(a parent/grandparent Management Group, or the tenant root `/`) - Azure has already resolved scope
+inheritance by the time a role shows up under that subscription's roles. This matters in practice:
+a custom role delegated purely via a Management Group
+(`"assignableScopes": ["/providers/Microsoft.Management/managementGroups/<mg>"]` - a common
+Landing-Zone/delegated-governance pattern) has **no** subscription or `/` entry in
+`assignable_scopes` at all, so an earlier version of this check that pattern-matched those strings
+missed it as a false negative. A custom role assignable *only* at a narrower resource-group/
+resource scope is still correctly excluded - not by our own scope logic, but because Azure's List
+Role Definitions API never returns a role scoped narrower than the scope you queried at, so it
+never appears under a subscription's roles in the first place.
 
 Custom roles are easy to create ad hoc and often escape the scrutiny given to built-in roles like
 Owner - this surfaces the ones that are just as powerful. This check deliberately does **not**
