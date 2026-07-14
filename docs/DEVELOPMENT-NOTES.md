@@ -71,38 +71,40 @@ Key code:
        path - the regex didn't anticipate). `compute_high_privilege_custom_roles` now only checks
        `role_type == 'CustomRole'` + `is_subscription_role_strong()`/`_role_has_resource_provider_
        wildcard()`; presence in that subscription's `roles` dict already proves reachability.
-  - **A separate but analogous over-filtering existed in three functions that check ROLE
-    ASSIGNMENTS rather than role definitions** - `compute_enterprise_app_subscription_privilege_
-    table`, `_principals_with_strong_subscription_role`, and `compute_standing_privileged_
-    subscription_assignments` all `continue`d (skipped) any assignment whose `scope` wasn't an
-    exact string match for the current subscription. Same root cause as the custom-role fix above:
-    Azure's `role_assignments.list_for_scope()` (also called with no `$filter`) is expected to
-    return assignments made at the subscription itself *and* at any ancestor scope (management
-    group/root) - so a **standing** role assignment made at an MG (not literally at the
-    subscription) was silently excluded by these three exact-match checks too, which would cause
-    real false negatives (an Enterprise App/principal with MG-inherited access invisible to the
-    relevant tables) and a real false positive (`aad-app-registration-owner-escalates-to-
-    subscription` claiming an owner would gain *new* access via the app, when they already hold
-    equivalent access through the MG).
+  - **The same over-filtering existed in three functions that check ROLE ASSIGNMENTS rather than
+    role definitions**, and "fixing" it took TWO iterations - the first was itself wrong.
+    `compute_enterprise_app_subscription_privilege_table`, `_principals_with_strong_subscription_
+    role`, and `compute_standing_privileged_subscription_assignments` all `continue`d (skipped) any
+    assignment whose `scope` wasn't an exact string match for `/subscriptions/{subscription_id}`.
+    That exact match excluded assignments inherited from an ancestor **management group** (the same
+    Landing-Zone gap as the custom-role case) - a real Owner/UAA assignment made at an MG was
+    invisible.
 
-    **Fixed in all three** by removing the scope-string check, the same way as the custom-role
-    case. Checked each for the collision risk this required care around in the custom-role case:
-    - `compute_enterprise_app_subscription_privilege_table`'s row key already includes
-      `subscription_id` (`f"{service_principal_id}::{subscription_id}::{role_id}"`) - safe as-is,
-      no restructuring needed.
-    - `_principals_with_strong_subscription_role`'s result is already bucketed per subscription
-      (`{subscription_id: set(principal_ids)}`) - safe as-is.
-    - `compute_standing_privileged_subscription_assignments` prefers the bare Azure assignment id
-      as its row key, which is exactly what made the *old* flat cross-subscription table
-      collision-prone - but it had already been restructured (see below) to build a fresh `table`
-      per subscription, so the same assignment id recurring across several subscriptions lands in
-      separate per-subscription dicts, not one shared one. Safe once that restructuring landed.
+    **First (wrong) fix:** dropped the scope check ENTIRELY. This looked analogous to the
+    role-definition fix but is NOT: `role_assignments.list_for_scope(scope='/subscriptions/{id}')`
+    is called with **no `$filter`**, and that API returns assignments at the subscription, at every
+    ancestor (MG/root), AND **at every DESCENDANT** (resource groups / resources beneath it). The
+    role-definition List API does not return descendants, but the role-assignment one does. So
+    dropping the check (a) over-reported - a role that only applies to one resource group was
+    counted as subscription-wide - and (b) caused a real regression the user hit: a single
+    descendant (resource-group-scoped) assignment that raised inside the loop (e.g. an unusual
+    `role_definition_id`, or a role whose permissions structure tripped `is_subscription_role_
+    strong`) would abort the whole `try` and **silently empty the Enterprise-Apps table finding**.
+    Previously those descendant assignments were skipped by the exact-scope check before ever
+    reaching the crashing line.
 
-    Verified each: a synthetic assignment scoped only to a Management Group is now correctly
-    picked up by all three, an Enterprise App's real MG-inherited role appears in its table, an
-    owner who already holds MG-inherited access no longer trips the escalation finding, and the
-    same MG-shared assignment id resolved into three different subscriptions produces three
-    separate rows (one per subscription), not a collision.
+    **Second (correct) fix:** a shared predicate `_assignment_reaches_whole_subscription(assignment,
+    subscription_id)` that excludes ONLY strict descendants (`scope` starts with
+    `/subscriptions/{id}/`) while keeping the subscription itself and ancestor MG/root scopes. Plus
+    per-assignment `try/except` in the two table-builders so one malformed assignment can never
+    abort the whole table again, and `.get('role_definition_id')` instead of bracket access. This
+    is a correctness fix in `_principals_with_strong_subscription_role` with a *security* edge: an
+    owner who only holds a role on one resource group must NOT be treated as already having
+    subscription access (which would suppress a legitimate owner-to-subscription escalation
+    finding). Verified: subscription-scope and MG-ancestor assignments are picked up by all three
+    functions; RG/resource-descendant assignments are excluded; a malformed descendant assignment
+    is skipped without emptying the table; and the original `principalType:'Unknown'` UAA-at-
+    subscription case still fires.
   - **Standing-privileged-assignments was originally a flat, cross-subscription table** under
     `aad.standing_privileged_subscription_role_assignments.id`. The user reported this as
     confusing in practice: the same principal holding a standing role on several subscriptions

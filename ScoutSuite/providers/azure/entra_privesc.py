@@ -439,6 +439,42 @@ def compute_users_strong_subscription_but_weak_directory(users, directory_roles,
         print_exception(f'Unable to compute users with strong subscription but weak directory role: {e}')
 
 
+def _assignment_reaches_whole_subscription(assignment, subscription_id):
+    """
+    True if a role assignment that ScoutSuite fetched for this subscription actually confers power
+    over the WHOLE subscription - i.e. it is scoped AT the subscription itself, or at an ANCESTOR
+    (a management group the subscription sits under, or the tenant root '/') - and NOT at a
+    narrower DESCENDANT (a resource group or a specific resource beneath the subscription).
+
+    This matters because `role_assignments.list_for_scope(scope='/subscriptions/{id}')` is called
+    with no `$filter`, so Azure returns assignments made at the subscription, at every ancestor
+    scope (inherited down to it), AND at every child scope beneath it (resource groups / resources).
+      - Ancestor scopes DO reach the whole subscription and must be kept. An earlier version of the
+        subscription checks required `scope == '/subscriptions/{id}'` exactly, which wrongly dropped
+        a real Owner/User Access Administrator assignment inherited from a management group (the
+        common Landing-Zone / delegated-governance pattern).
+      - Descendant scopes are NARROWER than the subscription and must be excluded. A later attempt
+        to "fix" the ancestor case by dropping the scope check ENTIRELY was also wrong: it started
+        counting a role that only applies to one resource group as if it applied to the whole
+        subscription (over-report), and - worse - let resource-group/resource assignments reach the
+        per-assignment body, where a single malformed one could raise and abort the whole table via
+        the surrounding try/except (silently emptying the finding).
+    Excluding only strict descendants keeps both cases correct.
+    """
+    raw_scope = assignment.get('scope') or ''
+    if raw_scope == '/':
+        return True  # tenant root - an ancestor of every subscription
+    scope = raw_scope.rstrip('/')
+    if not scope:
+        return False  # no/blank scope - anomalous; don't invent subscription-wide power from it
+    subscription_scope = f'/subscriptions/{subscription_id}'
+    if scope.lower() == subscription_scope.lower():
+        return True  # the subscription itself
+    if scope.lower().startswith(subscription_scope.lower() + '/'):
+        return False  # a resource group / resource under this subscription - narrower than it
+    return True  # a management group ancestor
+
+
 def compute_enterprise_app_subscription_privilege_table(service_principals, rbac_subscriptions):
     """
     Builds (and returns) a table, keyed by a synthetic row id (matching the dict-of-dicts
@@ -451,62 +487,62 @@ def compute_enterprise_app_subscription_privilege_table(service_principals, rbac
     Each row: service_principal_id, name, app_id, service_principal_type, subscription_id,
     role_name, owners (creator approximation).
 
-    No scope-string check is done on the assignment here (an earlier version required
-    `assignment.get('scope') == f'/subscriptions/{subscription_id}'` exactly, which missed a role
-    assignment made at a Management Group scope rather than directly on the subscription - the
-    same Landing-Zone/delegated-governance pattern that caused a false negative in
-    compute_high_privilege_custom_roles for role DEFINITIONS). Assignments are fetched per
-    subscription via role_assignments.list_for_scope(scope=f'/subscriptions/{subscription_id}'),
-    and, mirroring role_definitions.list()'s documented behaviour, this is expected to return
-    assignments made at that subscription OR at any ancestor scope (a parent Management Group, or
-    the tenant root) - i.e. Azure resolves scope inheritance before the assignment ever reaches
-    this code. The row key already includes subscription_id
-    (`f"{service_principal_id}::{subscription_id}::{role_id}"`), so, unlike the standing-
-    privileged-assignments table (which used the bare Azure assignment id as its key and needed to
-    move to a per-subscription table to avoid collisions), no restructuring was needed here to
-    safely drop the scope check.
+    Only assignments that reach the WHOLE subscription are counted (see
+    _assignment_reaches_whole_subscription): the subscription's own scope and any ancestor
+    management-group/root scope are included, while narrower resource-group/resource scopes are
+    excluded. Each assignment is processed defensively so that a single unexpected/malformed one
+    cannot abort the whole table.
     """
     table = {}
     try:
         for subscription_id, subscription in rbac_subscriptions.items():
             roles_by_id = subscription.get('roles', {})
             for assignment in subscription.get('role_assignments', {}).values():
-                # Match by principal ID against the fetched service principals rather than
-                # trusting Azure's reported `principal_type`. Azure Resource Manager's role
-                # assignments API can return principalType 'Unknown' for a genuine Service
-                # Principal (a known ARM quirk - e.g. when ARM's own AAD lookup at read time
-                # doesn't resolve), which would silently hide a real SP-held role if filtered on
-                # that field - this mirrors the same robust ID-based approach already used by
-                # AzureProvider._match_rbac_roles_and_principals(), which does not check
-                # principal_type at all.
-                service_principal = service_principals.get(assignment.get('principal_id'))
-                if not service_principal:
-                    continue
+                try:
+                    # Match by principal ID against the fetched service principals rather than
+                    # trusting Azure's reported `principal_type`. Azure Resource Manager's role
+                    # assignments API can return principalType 'Unknown' for a genuine Service
+                    # Principal (a known ARM quirk - e.g. when ARM's own AAD lookup at read time
+                    # doesn't resolve), which would silently hide a real SP-held role if filtered on
+                    # that field - this mirrors the same robust ID-based approach already used by
+                    # AzureProvider._match_rbac_roles_and_principals(), which does not check
+                    # principal_type at all.
+                    service_principal = service_principals.get(assignment.get('principal_id'))
+                    if not service_principal:
+                        continue
 
-                role_id = assignment['role_definition_id'].split('/')[-1]
-                role = roles_by_id.get(role_id)
-                if not role or not is_subscription_role_strong(role):
-                    continue
+                    # Subscription-wide only: skip resource-group / resource (descendant) scopes,
+                    # keep the subscription itself and management-group / root ancestor scopes.
+                    if not _assignment_reaches_whole_subscription(assignment, subscription_id):
+                        continue
 
-                service_principal.setdefault('strong_subscription_roles', []).append({
-                    'subscription_id': subscription_id,
-                    'role_name': role.get('name'),
-                })
+                    role_id = (assignment.get('role_definition_id') or '').split('/')[-1]
+                    role = roles_by_id.get(role_id)
+                    if not role or not is_subscription_role_strong(role):
+                        continue
 
-                row_id = f"{service_principal.get('id')}::{subscription_id}::{role_id}"
-                table[row_id] = {
-                    'id': row_id,
-                    'service_principal_id': service_principal.get('id'),
-                    'name': service_principal.get('app_name') or service_principal.get('name'),
-                    'app_id': service_principal.get('app_id'),
-                    'service_principal_type': service_principal.get('service_principal_type'),
-                    'subscription_id': subscription_id,
-                    'role_name': role.get('name'),
-                    'owners': [
-                        owner.get('display_name') or owner.get('user_principal_name') or owner.get('id')
-                        for owner in service_principal.get('owners', [])
-                    ],
-                }
+                    service_principal.setdefault('strong_subscription_roles', []).append({
+                        'subscription_id': subscription_id,
+                        'role_name': role.get('name'),
+                    })
+
+                    row_id = f"{service_principal.get('id')}::{subscription_id}::{role_id}"
+                    table[row_id] = {
+                        'id': row_id,
+                        'service_principal_id': service_principal.get('id'),
+                        'name': service_principal.get('app_name') or service_principal.get('name'),
+                        'app_id': service_principal.get('app_id'),
+                        'service_principal_type': service_principal.get('service_principal_type'),
+                        'subscription_id': subscription_id,
+                        'role_name': role.get('name'),
+                        'owners': [
+                            owner.get('display_name') or owner.get('user_principal_name') or owner.get('id')
+                            for owner in service_principal.get('owners', [])
+                        ],
+                    }
+                except Exception as e:
+                    print_exception(f'Skipping a role assignment while computing enterprise app '
+                                    f'subscription privilege table: {e}')
 
         for service_principal in service_principals.values():
             service_principal['has_strong_subscription_role'] = bool(
@@ -549,15 +585,11 @@ def compute_standing_privileged_subscription_assignments(rbac_subscriptions, use
     principals) rather than trusting Azure's reported principal_type, which can be 'Unknown'.
     Each row: principal_id, principal_name, principal_type, subscription_id, role_name.
 
-    No scope-string check is done on the assignment, for the same reason as
-    compute_enterprise_app_subscription_privilege_table: an assignment reaching this subscription's
-    role_assignments is trusted as applying to it, including one made at an ancestor Management
-    Group scope, rather than requiring `assignment.get('scope') == f'/subscriptions/
-    {subscription_id}'` exactly. Safe here too even though the row key prefers the bare Azure
-    assignment id (`row_id = assignment.get('id') or ...`, which is what made the OLD flat
-    cross-subscription table collision-prone for MG-inherited assignments): each subscription now
-    gets its own freshly-created `table` inside this loop, so the same assignment id recurring
-    across several subscriptions lands in separate per-subscription dicts, not one shared one.
+    Only assignments reaching the WHOLE subscription are counted (see
+    _assignment_reaches_whole_subscription): the subscription's own scope and any ancestor
+    management-group/root scope are included, while narrower resource-group/resource scopes are
+    excluded. Each assignment is processed defensively so a single unexpected one can't abort the
+    subscription's table.
     """
     try:
         def resolve_principal(principal_id):
@@ -574,26 +606,32 @@ def compute_standing_privileged_subscription_assignments(rbac_subscriptions, use
             table = {}
             roles_by_id = subscription.get('roles', {})
             for assignment in subscription.get('role_assignments', {}).values():
-                role_id = assignment['role_definition_id'].split('/')[-1]
-                role = roles_by_id.get(role_id)
-                if not role or not is_role_granting_subscription_role(role):
-                    continue
+                try:
+                    if not _assignment_reaches_whole_subscription(assignment, subscription_id):
+                        continue
+                    role_id = (assignment.get('role_definition_id') or '').split('/')[-1]
+                    role = roles_by_id.get(role_id)
+                    if not role or not is_role_granting_subscription_role(role):
+                        continue
 
-                principal_id = assignment.get('principal_id')
-                principal_name, resolved_type = resolve_principal(principal_id)
-                row_id = assignment.get('id') or f"{principal_id}::{subscription_id}::{role_id}"
-                table[row_id] = {
-                    'id': row_id,
-                    # 'name' is what the HTML report shows in the list / left menu for each row.
-                    'name': f"{principal_name} - {role.get('name')}",
-                    'principal_id': principal_id,
-                    'principal_name': principal_name,
-                    # Prefer the type resolved from the fetched directory objects; fall back to
-                    # Azure's reported type (which may be 'Unknown').
-                    'principal_type': resolved_type or assignment.get('principal_type'),
-                    'subscription_id': subscription_id,
-                    'role_name': role.get('name'),
-                }
+                    principal_id = assignment.get('principal_id')
+                    principal_name, resolved_type = resolve_principal(principal_id)
+                    row_id = assignment.get('id') or f"{principal_id}::{subscription_id}::{role_id}"
+                    table[row_id] = {
+                        'id': row_id,
+                        # 'name' is what the HTML report shows in the list / left menu for each row.
+                        'name': f"{principal_name} - {role.get('name')}",
+                        'principal_id': principal_id,
+                        'principal_name': principal_name,
+                        # Prefer the type resolved from the fetched directory objects; fall back to
+                        # Azure's reported type (which may be 'Unknown').
+                        'principal_type': resolved_type or assignment.get('principal_type'),
+                        'subscription_id': subscription_id,
+                        'role_name': role.get('name'),
+                    }
+                except Exception as e:
+                    print_exception(f'Skipping a role assignment while computing standing '
+                                    f'privileged subscription assignments: {e}')
             subscription['standing_privileged_role_assignments'] = table
             subscription['standing_privileged_role_assignments_count'] = len(table)
     except Exception as e:
@@ -606,20 +644,21 @@ def _principals_with_strong_subscription_role(rbac_subscriptions):
     reaching that subscription's scope. Used to tell whether an app owner already has the
     subscription access their app would grant them.
 
-    No scope-string check is done here, for the same reason as
-    compute_enterprise_app_subscription_privilege_table: an assignment reaching this subscription's
-    role_assignments (fetched via list_for_scope(scope=f'/subscriptions/{subscription_id}')) is
-    trusted as applying to it, including one made at an ancestor Management Group scope. Results
-    are already bucketed per subscription_id, so - like the table above, and unlike the older
-    standing-privileged-assignments table - there is no risk of an MG-inherited assignment
-    colliding across subscriptions here.
+    Only assignments reaching the WHOLE subscription count (see
+    _assignment_reaches_whole_subscription): the subscription's own scope plus any ancestor
+    management-group/root scope, excluding narrower resource-group/resource scopes. Getting this
+    wrong in the over-broad direction would be a *security* problem here specifically - an owner
+    who only holds a role on one resource group would be treated as already having subscription
+    access, suppressing a legitimate owner-to-subscription escalation finding.
     """
     result = {}
     for subscription_id, subscription in (rbac_subscriptions or {}).items():
         roles_by_id = subscription.get('roles', {})
         strong_principals = set()
         for assignment in subscription.get('role_assignments', {}).values():
-            role_id = assignment['role_definition_id'].split('/')[-1]
+            if not _assignment_reaches_whole_subscription(assignment, subscription_id):
+                continue
+            role_id = (assignment.get('role_definition_id') or '').split('/')[-1]
             role = roles_by_id.get(role_id)
             if role and is_subscription_role_strong(role):
                 strong_principals.add(assignment.get('principal_id'))
