@@ -1,0 +1,21 @@
+{
+    "description": "Custom Role Grants a Resource-Provider-Wide Wildcard on the Subscription",
+    "rationale": "This is a CUSTOM role definition (Microsoft.Authorization/roleDefinitions, roleType 'CustomRole') that is assignable at subscription (or tenant root) scope and grants a resource-provider-wide wildcard action such as 'Microsoft.Compute/*' or 'Microsoft.Storage/*'. That gives full control (create/read/update/delete) over every resource of that entire provider across the subscription. It is narrower than full Owner/Contributor - which is why it is reported at a lower severity than a high-privilege custom role - but it is still broad standing power that is easy to over-grant unnoticed, and depending on the provider it can enable lateral movement or data access. See the Assignments section on this role (below) for exactly who or what currently holds it.",
+    "remediation": "Confirm that this custom role genuinely needs wildcard control over the whole resource provider. Prefer replacing the '<provider>/*' wildcard with the specific actions actually required, and/or restrict assignable_scopes to a resource group or resource rather than the whole subscription. Review every principal listed under Assignments and remove any that do not need this level of access.",
+    "references": [
+        "https://learn.microsoft.com/en-us/azure/role-based-access-control/custom-roles",
+        "https://learn.microsoft.com/en-us/azure/role-based-access-control/role-definitions",
+        "https://learn.microsoft.com/en-us/azure/role-based-access-control/best-practices"
+    ],
+    "dashboard_name": "Roles",
+    "path": "rbac.subscriptions.id.roles.id",
+    "conditions": [
+        "and",
+        [
+            "rbac.subscriptions.id.roles.id.is_resource_provider_wildcard_custom_role",
+            "true",
+            ""
+        ]
+    ],
+    "id_suffix": "resource_provider_wildcard_custom_role"
+}

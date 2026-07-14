@@ -656,6 +656,26 @@ def compute_app_owner_subscription_escalation(applications, service_principals, 
 # path to end right after the subscription ID segment.
 _SUBSCRIPTION_SCOPE_RE = re.compile(r'^/subscriptions/[^/]+/?$', re.IGNORECASE)
 
+# A resource-provider-wide wildcard action such as 'Microsoft.Compute/*' or 'Microsoft.Storage/*'
+# grants full control over one entire Azure resource provider (create/read/update/delete every
+# resource of that provider across the whole subscription). That is broad standing power, though
+# narrower than full Owner/Contributor. Matches '<namespace>/*' (a single provider wildcard). The
+# bare '*' wildcard has no slash so it never matches here (it is already 'strong'/danger via
+# is_subscription_role_strong); 'Microsoft.Authorization/*' does match the regex but a role holding
+# it is likewise already high-privilege, and the flag below excludes any already-high-privilege
+# role, so such roles are only reported once (at danger), never double-flagged.
+_RESOURCE_PROVIDER_WILDCARD_RE = re.compile(r'^[^/*]+/\*$')
+
+
+def _role_has_resource_provider_wildcard(role_dict):
+    """True if any of the role's actions is a single resource-provider wildcard ('<namespace>/*')."""
+    for permission in role_dict.get('permissions') or []:
+        actions = permission.actions if hasattr(permission, 'actions') else permission.get('actions', [])
+        for action in actions or []:
+            if _RESOURCE_PROVIDER_WILDCARD_RE.match((action or '').lower()):
+                return True
+    return False
+
 
 def _is_assignable_at_subscription_or_root_scope(role_dict):
     """
@@ -687,10 +707,18 @@ def _is_assignable_at_subscription_or_root_scope(role_dict):
 def compute_high_privilege_custom_roles(rbac_subscriptions):
     """
     Flags each Azure RBAC CUSTOM role definition (Microsoft.Authorization/roleDefinitions) that is
-    assignable at subscription (or tenant root) scope AND grants 'strong' (Owner/Contributor/User
-    Access Administrator-equivalent) permissions, using the same is_subscription_role_strong()
-    heuristic used throughout this fork (see subscription_role_strength.json - tune there).
-    Mutates each such role dict with is_high_privilege_custom_role (bool).
+    assignable at subscription (or tenant root) scope, in two severity tiers:
+
+     - is_high_privilege_custom_role (danger): grants 'strong' (Owner/Contributor/User Access
+       Administrator-equivalent) permissions - a full '*' wildcard, a Microsoft.Authorization
+       wildcard, or the ability to write role assignments/definitions - via the same
+       is_subscription_role_strong() heuristic used throughout this fork (see
+       subscription_role_strength.json - tune there).
+     - is_resource_provider_wildcard_custom_role (warning): grants a resource-provider-wide
+       wildcard such as 'Microsoft.Compute/*' (broad control over one whole provider) but is NOT
+       already flagged as high-privilege above - a lower-severity, "worth reviewing" tier. Roles
+       that are already high-privilege are excluded here so each role is reported at exactly one
+       severity.
 
     Deliberately reuses ScoutSuite's existing Roles resource/dashboard/HTML partial rather than
     building a new table: each role object already carries its full permissions AND, once
@@ -702,10 +730,13 @@ def compute_high_privilege_custom_roles(rbac_subscriptions):
         for subscription_id, subscription in (rbac_subscriptions or {}).items():
             for role in subscription.get('roles', {}).values():
                 is_custom = (role.get('role_type') or '').lower() == 'customrole'
-                role['is_high_privilege_custom_role'] = bool(
-                    is_custom
-                    and _is_assignable_at_subscription_or_root_scope(role)
-                    and is_subscription_role_strong(role)
+                assignable = _is_assignable_at_subscription_or_root_scope(role)
+                is_high_privilege = bool(
+                    is_custom and assignable and is_subscription_role_strong(role))
+                role['is_high_privilege_custom_role'] = is_high_privilege
+                role['is_resource_provider_wildcard_custom_role'] = bool(
+                    is_custom and assignable and not is_high_privilege
+                    and _role_has_resource_provider_wildcard(role)
                 )
     except Exception as e:
         print_exception(f'Unable to compute high-privilege custom roles: {e}')

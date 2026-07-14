@@ -22,6 +22,7 @@ all wired into `providers/azure/rules/rulesets/default.json`:
 | `rbac-high-privilege-custom-role` (Azure RBAC, not Graph - reuses the existing Roles dashboard/partial, no new table) | danger |
 | `aad-enterprise-app-strong-subscription-role` | warning |
 | `aad-managed-identity-strong-subscription-role` | warning |
+| `rbac-resource-provider-wildcard-custom-role` (Azure RBAC, lower-severity companion to `rbac-high-privilege-custom-role`; e.g. `Microsoft.Compute/*`) | warning |
 
 Key code:
 - Fetching: `providers/azure/facade/aad.py` (owners, appRoleAssignments, oauth2 grants, directory

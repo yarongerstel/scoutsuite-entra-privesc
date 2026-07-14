@@ -29,8 +29,11 @@ and are toggled in `rules/rulesets/default.json`.
 11. **Custom Azure RBAC role grants high privilege on a subscription**
     (`rbac-high-privilege-custom-role`) - not Entra/Graph-based like the others, but the same
     "strong subscription privilege" heuristic; see [below](#11-high-privilege-custom-rbac-roles).
+12. **Custom Azure RBAC role grants a resource-provider-wide wildcard** (lower severity)
+    (`rbac-resource-provider-wildcard-custom-role`) - e.g. `Microsoft.Compute/*`; a warning-level
+    companion to check 11.
 
-Checks 1-2 are described in detail below; checks 3-11 are summarized in
+Checks 1-2 are described in detail below; checks 3-12 are summarized in
 [Additional checks](#additional-checks).
 
 ## 1. App Registration owner vs. granted permissions
@@ -206,6 +209,19 @@ render on the existing "Roles" dashboard/partial - including an **Assignments** 
 (Users/Groups/Service Principals, resolved to display names, with a count badge) already
 populated by upstream's `AzureProvider._match_rbac_roles_and_principals()`. That Assignments list
 *is* "who/what is assigned to this role" - no new code needed to show it.
+
+### 12. Resource-provider-wildcard custom RBAC roles (lower severity)
+`rbac-resource-provider-wildcard-custom-role` (warning). A lower-severity companion to the check
+above, computed in the same pass (`compute_high_privilege_custom_roles` sets both flags). Flags a
+**custom** role, assignable at subscription (or tenant root) scope, whose actions include a
+**single-resource-provider wildcard** such as `Microsoft.Compute/*` or `Microsoft.Storage/*` -
+full control over one entire provider across the subscription. That is broad standing power but
+narrower than full Owner/Contributor, hence `warning` rather than `danger`. Matching is a regex
+(`_RESOURCE_PROVIDER_WILDCARD_RE` = `^<namespace>/*$`); the bare `*` wildcard has no slash and
+never matches, and any role already flagged as high-privilege (danger) - including one holding
+`Microsoft.Authorization/*` - is **excluded** here, so each role is reported at exactly one
+severity, never double-flagged. Like check 11 it reuses the existing `Roles` dashboard/partial and
+its Assignments section - no new table/resource/template.
 
 ## Required Microsoft Graph permissions
 

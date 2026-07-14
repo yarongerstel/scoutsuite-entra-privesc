@@ -388,6 +388,12 @@
                 "level": "danger"
             }
         ],
+        "rbac-resource-provider-wildcard-custom-role.json": [
+            {
+                "enabled": true,
+                "level": "warning"
+            }
+        ],
         "securitycenter-auto-provisioning-off.json": [
             {
                 "enabled": true,

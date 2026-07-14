@@ -117,16 +117,18 @@ permission block on the role, works regardless of what's excluded via `notAction
 - Roles assignable only via a Management Group scope (no MG hierarchy data is fetched at all -
   documented gap, distinct from the two above).
 
-**I asked the user to choose between two options and have not yet received an answer:**
-1. Leave the bar as-is (only true Owner-equivalent roles flagged as `danger`).
-2. Add a second, lower-severity (`warning`) finding for "custom role with a broad
-   resource-provider-specific wildcard, but not full Owner-equivalent power" - mirroring the
-   two-tier pattern already used elsewhere in this fork (VPC flow logs, unused security groups).
-
-**If resuming this session cold: ask the user which of the two options above they want before
-touching `is_subscription_role_strong()` or adding a new finding for RP-wide wildcards.** Don't
-guess - this is exactly the kind of heuristic-tuning tradeoff the user should decide, and they were
-already mid-decision when this summary was written.
+**RESOLVED - the user chose option 2 (add a lower-severity finding).** Implemented as
+`rbac-resource-provider-wildcard-custom-role` (warning): a custom role assignable at subscription
+(or root) scope whose actions include a single-resource-provider wildcard (`<namespace>/*`, e.g.
+`Microsoft.Compute/*`) but is NOT already flagged high-privilege (danger). Computed in the same
+pass by `compute_high_privilege_custom_roles`, which now sets two flags -
+`is_high_privilege_custom_role` (danger) and `is_resource_provider_wildcard_custom_role` (warning)
+- and excludes any already-high-privilege role from the warning tier so each role is reported at
+exactly one severity. `is_subscription_role_strong()` itself was left unchanged (the danger bar is
+still only true Owner-equivalent power); the new tier is additive. Detection: `_role_has_resource_
+provider_wildcard()` + `_RESOURCE_PROVIDER_WILDCARD_RE` (`^<namespace>/*$`). Reuses the existing
+Roles dashboard/partial - no new table. Still NOT caught (unchanged, documented gaps): `*/read` +
+`*/write` dual-wildcard patterns, and Management-Group-only assignable scopes.
 
 ## Testing setup (must be recreated in a fresh environment/session)
 
@@ -173,8 +175,8 @@ There is no live Azure tenant available in this sandbox. Everything was verified
 - `docs/entra-privesc-checks.md` - full write-up of all Entra/Graph + RBAC subscription checks.
 - `docs/network-segregation-checks.md` - full write-up of the VNet peering checks.
 - `docs/DEVELOPMENT-NOTES.md` - developer-facing architecture reference, the "add a new check"
-  pattern, and a longer-running backlog list (RP-wide wildcard question above is NOT yet added
-  there - add it if this open decision gets resolved or deferred to backlog).
+  pattern, and a longer-running backlog list (the RP-wide wildcard question above is now RESOLVED
+  and shipped as `rbac-resource-provider-wildcard-custom-role`).
 - `ScoutSuite/providers/azure/entra_privesc.py` - almost all Entra + RBAC-subscription-strength
   correlation logic (yes, including the RBAC custom-role check - kept there for consistency, since
   it reuses `is_subscription_role_strong()` from the same module).
@@ -196,6 +198,6 @@ There is no live Azure tenant available in this sandbox. Everything was verified
 
 `git pull` on `main` in `/workspace/scoutsuite-entra-privesc` (or re-clone
 `yarongerstel/scoutsuite-entra-privesc`), recreate the venv (command above), read this file plus
-`DEVELOPMENT-NOTES.md`, and resolve the open RP-wide-wildcard decision with the user before doing
-anything else - it's the one loose thread. Everything else described here is finished, tested, and
-already pushed.
+`DEVELOPMENT-NOTES.md`. There are no open decisions - the RP-wide-wildcard question was resolved
+(the user chose the lower-severity finding) and shipped. Everything described here is finished,
+tested, and already pushed.
