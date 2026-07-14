@@ -507,18 +507,34 @@ def compute_enterprise_app_subscription_privilege_table(service_principals, rbac
 def compute_standing_privileged_subscription_assignments(rbac_subscriptions, users=None, groups=None,
                                                          service_principals=None):
     """
-    Builds (and returns) a table, keyed by role-assignment id, of every STANDING (active, i.e.
-    not PIM just-in-time) role assignment at subscription scope where the role can assign other
-    roles (Owner, User Access Administrator, RBAC Administrator, or a custom role with
-    roleAssignments/write / wildcard). This is a baseline least-privilege finding - independent
-    of the escalation-correlation checks - covering ANY principal type (User, Group, Service
-    Principal, Managed Identity), matching the 'persistent privileged access' class of finding.
+    For every subscription, builds (and stores directly on that subscription's dict, under
+    'standing_privileged_role_assignments') a table, keyed by role-assignment id, of every
+    STANDING (active, i.e. not PIM just-in-time) role assignment at that subscription's scope
+    where the role can assign other roles (Owner, User Access Administrator, RBAC Administrator,
+    or a custom role with roleAssignments/write / wildcard). This is a baseline least-privilege
+    finding - independent of the escalation-correlation checks - covering ANY principal type
+    (User, Group, Service Principal, Managed Identity), matching the 'persistent privileged
+    access' class of finding.
+
+    Grouped per subscription (mirroring the existing RBAC Roles/RoleAssignments/
+    CustomRolesReport children of each subscription) rather than one flat cross-subscription
+    table: the same principal can legitimately hold this kind of role on several subscriptions,
+    and a flat table showed it as several look-alike rows (identical "principal - role" name,
+    distinguished only by a small subscription_id field) - a real usability complaint. Grouping
+    by subscription, like the Roles dashboard already does, makes each subscription's standing
+    assignments a separate, clearly-labelled list instead of one undifferentiated pile.
+
+    Also sets 'standing_privileged_role_assignments_count' on each subscription (mirroring how
+    upstream's own _fetch_children() counts every other per-subscription child resource) - the
+    HTML report only paginates/loads a resource that has one. The caller is responsible for
+    summing these into an aggregate count at the rbac service level, since this resource isn't
+    part of RBAC's statically-declared _children list that upstream's own Subscriptions.
+    _set_counts() sums automatically.
 
     Principal type/name are resolved against the fetched aad collections (users/groups/service
     principals) rather than trusting Azure's reported principal_type, which can be 'Unknown'.
     Each row: principal_id, principal_name, principal_type, subscription_id, role_name.
     """
-    table = {}
     try:
         def resolve_principal(principal_id):
             for collection, principal_type in (
@@ -531,6 +547,7 @@ def compute_standing_privileged_subscription_assignments(rbac_subscriptions, use
             return principal_id, None
 
         for subscription_id, subscription in (rbac_subscriptions or {}).items():
+            table = {}
             roles_by_id = subscription.get('roles', {})
             for assignment in subscription.get('role_assignments', {}).values():
                 if assignment.get('scope') != f'/subscriptions/{subscription_id}':
@@ -555,10 +572,10 @@ def compute_standing_privileged_subscription_assignments(rbac_subscriptions, use
                     'subscription_id': subscription_id,
                     'role_name': role.get('name'),
                 }
+            subscription['standing_privileged_role_assignments'] = table
+            subscription['standing_privileged_role_assignments_count'] = len(table)
     except Exception as e:
         print_exception(f'Unable to compute standing privileged subscription assignments: {e}')
-
-    return table
 
 
 def _principals_with_strong_subscription_role(rbac_subscriptions):

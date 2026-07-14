@@ -83,10 +83,6 @@
         "enterprise_apps_with_strong_subscription_roles": {
           "cols": 2,
           "path": "services.aad.enterprise_apps_with_strong_subscription_roles"
-        },
-        "standing_privileged_subscription_role_assignments": {
-          "cols": 2,
-          "path": "services.aad.standing_privileged_subscription_role_assignments"
         }
       }
     },
@@ -99,6 +95,10 @@
         "custom_roles_report": {
           "cols": 2,
           "path": "services.rbac.subscriptions.id.custom_roles_report"
+        },
+        "standing_privileged_role_assignments": {
+          "cols": 2,
+          "path": "services.rbac.subscriptions.id.standing_privileged_role_assignments"
         }
       }
     },

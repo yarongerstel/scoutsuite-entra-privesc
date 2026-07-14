@@ -8,11 +8,11 @@
         "https://learn.microsoft.com/en-us/security/benchmark/azure/mcsb-privileged-access"
     ],
     "dashboard_name": "Standing Privileged Subscription Role Assignments",
-    "path": "aad.standing_privileged_subscription_role_assignments.id",
+    "path": "rbac.subscriptions.id.standing_privileged_role_assignments.id",
     "conditions": [
         "and",
         [
-            "aad.standing_privileged_subscription_role_assignments.id.role_name",
+            "rbac.subscriptions.id.standing_privileged_role_assignments.id.role_name",
             "notEmpty",
             ""
         ]

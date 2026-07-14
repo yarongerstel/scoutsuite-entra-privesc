@@ -25,7 +25,7 @@ and are toggled in `rules/rulesets/default.json`.
 9. **App Registration owner can escalate to subscription control**
    (`aad-app-registration-owner-escalates-to-subscription`)
 10. **Standing privilege-escalation-capable subscription role assignment (baseline)**
-    (`aad-standing-privileged-subscription-role-assignment`)
+    (`rbac-standing-privileged-subscription-role-assignment`)
 11. **Custom Azure RBAC role grants high privilege on a subscription**
     (`rbac-high-privilege-custom-role`) - not Entra/Graph-based like the others, but the same
     "strong subscription privilege" heuristic; see [below](#11-high-privilege-custom-rbac-roles).
@@ -159,7 +159,7 @@ subscription, concentrating blast radius on low-privileged users. Compromising o
 then yields subscription-level control.
 
 ### 10. Standing privilege-escalation-capable subscription role assignment (baseline)
-`aad-standing-privileged-subscription-role-assignment` (danger). Unlike the other checks (which
+`rbac-standing-privileged-subscription-role-assignment` (danger). Unlike the other checks (which
 are conditional/correlational), this is a **baseline least-privilege** check: it flags **every**
 standing (active, non-PIM) role assignment at subscription scope of a role that can assign other
 roles - Owner, User Access Administrator, RBAC Administrator, or a custom role with
@@ -170,6 +170,15 @@ fills the gap the correlational checks leave (e.g. a User who holds User Access 
 is *not* weak in the directory, so check 7 does not fire). Contributor is deliberately excluded
 (it is "strong" but cannot assign roles). Principal type is resolved from the fetched directory
 objects, so it is robust to Azure ARM reporting `principalType: 'Unknown'`.
+
+Data lives under `rbac.subscriptions.id.standing_privileged_role_assignments.id` - grouped per
+subscription (mirroring Roles/RoleAssignments/CustomRolesReport, the existing children of each
+RBAC subscription), not one flat cross-subscription table. Originally it lived under `aad` as a
+flat table; a user with a standing role on several subscriptions showed as several visually
+identical rows ("Alice - Owner" repeated N times, distinguished only by a small subscription_id
+field in the details), which was reported as confusing. Grouping by subscription - which is how
+the built-in Roles dashboard already presents equivalent data - puts each subscription's standing
+assignments in a separate, clearly-labelled list instead of one undifferentiated pile.
 
 ### 9. App Registration owner can escalate to subscription control
 `aad-app-registration-owner-escalates-to-subscription` (danger). The subscription/Azure-RBAC

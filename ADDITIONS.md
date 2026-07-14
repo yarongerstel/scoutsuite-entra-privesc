@@ -38,20 +38,22 @@ tenant).
 | 5 | `aad-app-federated-credential-broad` | danger | An **overly-broad federated identity credential** (Workload Identity Federation) — wildcard subject, flexible-claims matching, or a CI issuer not pinned to a specific branch/tag/environment — that lets outside workloads mint tokens as the app. |
 | 6 | `aad-guest-user-strong-role` | danger | A **guest** (`userType == Guest`) holding a strong directory role (active or PIM-eligible) or a strong Azure RBAC role on a subscription. |
 | 7 | `aad-user-strong-subscription-but-weak-directory` | danger | A user who is **weak in the directory** (no admin role, active or PIM-eligible) yet holds a **strong Azure RBAC role** on a subscription — concentrated control-plane blast radius on an ordinary account. |
-| 8 | `aad-standing-privileged-subscription-role-assignment` | danger | Baseline least-privilege check: every **standing (always-active, non-PIM)** role assignment at subscription scope of a role that can assign other roles (Owner / User Access Administrator / RBAC Administrator / custom role with `roleAssignments/write`), for **any** principal type. |
-| 9 | `aad-enterprise-app-strong-subscription-role` | warning | Table of every **Enterprise Application** holding a strong Azure RBAC role directly at subscription scope — which permission, and its owners (creator approximation). |
-| 10 | `aad-managed-identity-strong-subscription-role` | warning | Subset of #9 called out separately: a **Managed Identity** with a strong subscription role — a distinct control-plane escalation vector (token available from instance metadata). |
+| 8 | `aad-enterprise-app-strong-subscription-role` | warning | Table of every **Enterprise Application** holding a strong Azure RBAC role directly at subscription scope — which permission, and its owners (creator approximation). |
+| 9 | `aad-managed-identity-strong-subscription-role` | warning | Subset of #8 called out separately: a **Managed Identity** with a strong subscription role — a distinct control-plane escalation vector (token available from instance metadata). |
 
-## Azure — RBAC custom-role checks
+## Azure — RBAC checks
 
-Pure Azure RBAC (`Microsoft.Authorization/roleDefinitions`), no Graph permission needed. Both
-reuse ScoutSuite's **existing Roles dashboard/partial** — including the **Assignments** section
-(who/what holds the role, resolved to display names) — so no new table or template is introduced.
+Pure Azure RBAC (`Microsoft.Authorization/roleDefinitions` / role assignments), no Graph
+permission needed. #10/#11 reuse ScoutSuite's **existing Roles dashboard/partial** — including the
+**Assignments** section (who/what holds the role, resolved to display names) — so no new table or
+template is introduced. #12 has its own new resource, grouped per subscription the same way the
+built-in Roles dashboard already is.
 
 | # | Finding | Severity | What it detects |
 |---|---------|----------|-----------------|
-| 11 | `rbac-high-privilege-custom-role` | danger | A **custom** role, assignable at subscription (or tenant root) scope, granting Owner/Contributor/User Access Administrator-equivalent power — a `*` wildcard, `Microsoft.Authorization/*`, or role-assignment/definition write. |
-| 12 | `rbac-resource-provider-wildcard-custom-role` | warning | Lower-severity companion to #11: a custom role granting a **single resource-provider wildcard** (e.g. `Microsoft.Compute/*`) — broad control of one whole provider, narrower than full Owner. A role is reported at **exactly one** severity, never both. |
+| 10 | `rbac-high-privilege-custom-role` | danger | A **custom** role, assignable at subscription (or tenant root) scope, granting Owner/Contributor/User Access Administrator-equivalent power — a `*` wildcard, `Microsoft.Authorization/*`, or role-assignment/definition write. |
+| 11 | `rbac-resource-provider-wildcard-custom-role` | warning | Lower-severity companion to #10: a custom role granting a **single resource-provider wildcard** (e.g. `Microsoft.Compute/*`) — broad control of one whole provider, narrower than full Owner. A role is reported at **exactly one** severity, never both. |
+| 12 | `rbac-standing-privileged-subscription-role-assignment` | danger | Baseline least-privilege check: every **standing (always-active, non-PIM)** role assignment at subscription scope of a role that can assign other roles (Owner / User Access Administrator / RBAC Administrator / custom role with `roleAssignments/write`), for **any** principal type. Grouped per subscription — the same principal on N subscriptions shows as N separate, clearly-labelled rows instead of one flat table of look-alike entries. |
 
 ## Azure — network segregation checks
 

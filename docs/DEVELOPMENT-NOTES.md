@@ -18,7 +18,7 @@ all wired into `providers/azure/rules/rulesets/default.json`:
 | `aad-app-federated-credential-broad` | danger |
 | `aad-guest-user-strong-role` | danger |
 | `aad-user-strong-subscription-but-weak-directory` | danger |
-| `aad-standing-privileged-subscription-role-assignment` | danger |
+| `rbac-standing-privileged-subscription-role-assignment` (Azure RBAC, not Graph - grouped per subscription like Roles, own new resource/partial) | danger |
 | `rbac-high-privilege-custom-role` (Azure RBAC, not Graph - reuses the existing Roles dashboard/partial, no new table) | danger |
 | `aad-enterprise-app-strong-subscription-role` | warning |
 | `aad-managed-identity-strong-subscription-role` | warning |
@@ -80,13 +80,34 @@ Key code:
     ancestor scope (management group/root), the same inheritance behavior as role definitions -
     which would mean a **standing** role assignment made at an MG (not literally at the
     subscription) is silently excluded by these three exact-match checks too. This is flagged but
-    **not yet fixed** - unlike the role-definition case, naively dropping the scope filter here
-    would collapse an MG-inherited assignment into a single table row (since the same assignment
-    `id` recurs identically across every subscription under that MG, and the table dict is keyed
-    by that `id`), losing the "which subscriptions does this reach" information; fixing it
-    properly needs the row key to also incorporate `subscription_id`. Confirm with the user before
-    changing this - it touches three functions and the correct fix needs more care than the
-    role-definition case did.
+    **not yet fixed** - fixing it properly needs the row key to also incorporate `subscription_id`
+    to avoid collisions. Confirm with the user before changing this.
+    **Note**: the per-subscription restructuring described below (standing-privileged-assignments
+    grouping) happens to remove that specific collision risk for `compute_standing_privileged_
+    subscription_assignments` alone - its table is now keyed independently within each
+    subscription's own dict, so an MG-inherited assignment recurring across subscriptions would
+    land in separate per-subscription tables rather than colliding on one shared key. The other two
+    functions (`compute_enterprise_app_subscription_privilege_table`,
+    `_principals_with_strong_subscription_role`) still use flat/cross-subscription keying, so the
+    collision risk - and the "confirm before changing" caution - still applies to them.
+  - **Standing-privileged-assignments was originally a flat, cross-subscription table** under
+    `aad.standing_privileged_subscription_role_assignments.id`. The user reported this as
+    confusing in practice: the same principal holding a standing role on several subscriptions
+    showed up as several visually identical rows ("Alice - Owner" repeated N times), distinguished
+    only by a small `subscription_id` field visible in each row's detail panel - easy to miss.
+    **Restructured** to mirror how the built-in Roles dashboard already presents equivalent data:
+    `compute_standing_privileged_subscription_assignments` now builds a separate table PER
+    subscription, stored directly on that subscription's own dict
+    (`subscription['standing_privileged_role_assignments']`), so the finding's path moved to
+    `rbac.subscriptions.id.standing_privileged_role_assignments.id` (was `aad.standing_privileged_
+    subscription_role_assignments.id`) and the finding file was renamed `aad-standing-privileged-
+    subscription-role-assignment.json` → `rbac-standing-privileged-subscription-role-assignment.
+    json` to match the other `rbac-*` findings that already live under this path shape. Metadata,
+    ruleset registration, and the HTML partial (moved + renamed to `services.rbac.subscriptions.
+    id.standing_privileged_role_assignments.html`, `{{@../key}}`/`{{@key}}` conventions matching
+    the Roles partial) were all updated to match. Verified end-to-end: the real ProcessingEngine
+    fires one finding item per subscription (not collapsed into one), and the real Handlebars/
+    helpers.js render each subscription's assignments as a separate, clearly-labelled group.
 
 ### Azure network segregation checks
 See [`network-segregation-checks.md`](network-segregation-checks.md) for the full write-up. Two

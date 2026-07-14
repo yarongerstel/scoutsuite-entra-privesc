@@ -162,15 +162,21 @@ class AzureProvider(BaseProvider):
                     groups=self.services['aad']['groups'])
 
                 # Baseline: every standing (active) role-granting assignment at subscription scope,
-                # for any principal type - independent of the escalation-correlation checks.
-                standing_table = entra_privesc.compute_standing_privileged_subscription_assignments(
+                # for any principal type - independent of the escalation-correlation checks. Grouped
+                # per subscription (mirroring Roles/RoleAssignments/CustomRolesReport) rather than
+                # one flat cross-subscription table, so a principal holding this on N subscriptions
+                # shows as N clearly-labelled per-subscription rows instead of N look-alike flat
+                # rows distinguished only by a small subscription_id field.
+                entra_privesc.compute_standing_privileged_subscription_assignments(
                     rbac_subscriptions=self.services['rbac']['subscriptions'],
                     users=self.services['aad']['users'],
                     groups=self.services['aad']['groups'],
                     service_principals=self.services['aad']['service_principals'])
-                self.services['aad']['standing_privileged_subscription_role_assignments'] = standing_table
-                self.services['aad']['standing_privileged_subscription_role_assignments_count'] = \
-                    len(standing_table)
+                # Not part of RBAC's statically-declared _children, so unlike roles_count etc. this
+                # aggregate isn't summed automatically by Subscriptions._set_counts() - do it here.
+                self.services['rbac']['standing_privileged_role_assignments_count'] = sum(
+                    subscription.get('standing_privileged_role_assignments_count', 0)
+                    for subscription in self.services['rbac']['subscriptions'].values())
 
             if 'rbac' in self.service_list:
                 # Only needs rbac (role definitions + assignments), independent of AAD.

@@ -67,12 +67,6 @@
                 "level": "warning"
             }
         ],
-        "aad-standing-privileged-subscription-role-assignment.json": [
-            {
-                "enabled": true,
-                "level": "danger"
-            }
-        ],
         "appservice-authentication-disabled.json": [
             {
                 "enabled": true,
@@ -392,6 +386,12 @@
             {
                 "enabled": true,
                 "level": "warning"
+            }
+        ],
+        "rbac-standing-privileged-subscription-role-assignment.json": [
+            {
+                "enabled": true,
+                "level": "danger"
             }
         ],
         "securitycenter-auto-provisioning-off.json": [
