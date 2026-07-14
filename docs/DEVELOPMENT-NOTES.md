@@ -24,6 +24,17 @@ all wired into `providers/azure/rules/rulesets/default.json`:
 | `aad-managed-identity-strong-subscription-role` | warning |
 | `rbac-resource-provider-wildcard-custom-role` (Azure RBAC, lower-severity companion to `rbac-high-privilege-custom-role`; e.g. `Microsoft.Compute/*`) | warning |
 
+The Roles drill-down (`ScoutSuite/output/data/html/partials/azure/services.rbac.subscriptions.id.roles.html`) - the
+UPSTREAM partial these two RBAC findings reuse, shared with every built-in role too - was extended
+with two always-visible lines: **Subscription** (resolves `@../key`, the parent `{{#each}}`'s key,
+via `getValueAt` to the subscription's display name + ID - needed because the same role definition
+can legitimately appear under multiple subscriptions, e.g. one assignable at a Management Group
+scope) and **Full Permissions (JSON)** (the raw `actions`/`notActions`/`dataActions` array via the
+existing `jsonToString` helper, always visible rather than only inside the pre-existing collapsed
+"Permissions" accordion). This is the one place in the fork that edits an existing upstream
+partial rather than adding a new one - low risk (two additive lines, no existing markup removed)
+but worth knowing about if diffing against upstream.
+
 Key code:
 - Fetching: `providers/azure/facade/aad.py` (owners, appRoleAssignments, oauth2 grants, directory
   roles, PIM eligibility schedules, federated identity credentials), `providers/azure/resources/aad/`
